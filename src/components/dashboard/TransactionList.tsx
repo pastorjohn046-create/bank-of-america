@@ -49,7 +49,13 @@ export const TransactionList: React.FC<TransactionListProps> = ({ transactions }
                 <p className={`font-bold text-sm ${tx.amount > 0 ? 'text-green-600' : 'text-text-main'}`}>
                   {tx.amount > 0 ? '+' : ''}{new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(tx.amount)}
                 </p>
-                <p className="text-[10px] text-text-muted font-bold uppercase tracking-widest">{tx.status}</p>
+                <p className={`text-[10px] font-bold uppercase tracking-widest ${
+                  tx.status === 'pending' ? 'text-amber-500' : 
+                  tx.status === 'rejected' ? 'text-red-500' : 
+                  'text-text-muted'
+                }`}>
+                  {tx.status}
+                </p>
               </div>
             </div>
           ))}
@@ -76,7 +82,13 @@ export const TransactionList: React.FC<TransactionListProps> = ({ transactions }
                       </div>
                       <div>
                         <p className="font-semibold text-text-main text-sm">{tx.description}</p>
-                        <p className="text-xs text-text-muted">{tx.status === 'completed' ? 'Digital Service' : 'Pending Transaction'}</p>
+                        <p className={`text-xs font-bold uppercase tracking-tighter ${
+                          tx.status === 'pending' ? 'text-amber-500' : 
+                          tx.status === 'rejected' ? 'text-red-500' : 
+                          'text-text-muted'
+                        }`}>
+                          {tx.status === 'completed' ? 'Settled' : tx.status}
+                        </p>
                       </div>
                     </div>
                   </td>

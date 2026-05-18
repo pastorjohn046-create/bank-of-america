@@ -27,8 +27,9 @@ export const AdminPanel = () => {
   const { user } = useAuth();
   const [metrics, setMetrics] = useState<AdminMetrics | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [transactions, setTransactions] = useState<{ id: string, accountId: string, amount: number, description: string, status: string, type: string, date: string }[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [activeView, setActiveView] = useState<'overview' | 'accounts' | 'transactions' | 'bills'>('overview');
+  const [activeView, setActiveView] = useState<'overview' | 'accounts' | 'transactions' | 'bills' | 'approvals'>('overview');
 
   // Form States
   const [selectedAccId, setSelectedAccId] = useState('');
@@ -37,6 +38,30 @@ export const AdminPanel = () => {
   const [newCredit, setNewCredit] = useState('');
   const [accountStatus, setAccountStatus] = useState<'active' | 'disabled'>('active');
   const [isDepositRestricted, setIsDepositRestricted] = useState(false);
+
+  const handleUpdateDepositDetails = async () => {
+    if (!selectedAccId) return;
+    const acc = accounts.find(a => a.id === selectedAccId);
+    if (!acc) return;
+    
+    try {
+      const res = await fetch(`/api/admin/users/${acc.userId}/deposit-details`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          paypal: pp, 
+          cashapp: ca, 
+          zelle: zl, 
+          bitcoin: bc, 
+          bankInfo: bi 
+        })
+      });
+      if (!res.ok) throw new Error('Update failed');
+      showStatus('User deposit instructions secured');
+    } catch (err) {
+       showStatus('Failed to update deposit instructions', 'error');
+    }
+  };
 
   const [statusMsg, setStatusMsg] = useState<{ text: string, type: 'success' | 'error' } | null>(null);
   const [adminLogs, setAdminLogs] = useState<{ id: string, msg: string, time: string }[]>([]);
@@ -93,21 +118,31 @@ export const AdminPanel = () => {
   const [billDue, setBillDue] = useState('');
   const [billCat, setBillCat] = useState('Utility');
 
+  // Deposit Details States
+  const [pp, setPp] = useState('');
+  const [ca, setCa] = useState('');
+  const [zl, setZl] = useState('');
+  const [bc, setBc] = useState('');
+  const [bi, setBi] = useState('');
+
   const fetchAll = async () => {
     setIsLoading(true);
     try {
-      const [mRes, aRes] = await Promise.all([
+      const [mRes, aRes, tRes] = await Promise.all([
         fetch('/api/admin/metrics'),
-        fetch('/api/accounts')
+        fetch('/api/accounts'),
+        fetch('/api/transactions')
       ]);
       const metricsData = await mRes.json();
       setMetrics(metricsData);
       const accs = await aRes.json();
       setAccounts(accs);
+      const txs = await tRes.json();
+      setTransactions(txs);
       
       if (accs.length > 0) {
-        // If we have a selected account, find it in the new list to refresh its data
-        const currentSelected = accs.find((a: Account) => a.id === (selectedAccId || accs[0].id));
+        const currentSelectedId = selectedAccId || accs[0].id;
+        const currentSelected = accs.find((a: Account) => a.id === currentSelectedId);
         if (currentSelected) {
           setSelectedAccId(currentSelected.id);
           setEditName(currentSelected.name);
@@ -115,6 +150,15 @@ export const AdminPanel = () => {
           setNewCredit(currentSelected.creditLimit?.toString() || '');
           setAccountStatus(currentSelected.status);
           setIsDepositRestricted(currentSelected.depositRestricted);
+
+          // Fetch user's deposit details
+          const dRes = await fetch(`/api/users/${currentSelected.userId}/deposit-details`);
+          const dData = await dRes.json();
+          setPp(dData.paypal || '');
+          setCa(dData.cashapp || '');
+          setZl(dData.zelle || '');
+          setBc(dData.bitcoin || '');
+          setBi(dData.bankInfo || '');
         }
       }
     } catch (err) {
@@ -216,6 +260,17 @@ export const AdminPanel = () => {
     }
   };
 
+  const handleTxDecision = async (id: string, action: 'approve' | 'reject') => {
+    try {
+      const res = await fetch(`/api/admin/transactions/${id}/${action}`, { method: 'POST' });
+      if (!res.ok) throw new Error(`${action} failed`);
+      showStatus(`Transaction ${action}d successfully`);
+      fetchAll();
+    } catch (err) {
+      showStatus(`Failed to ${action} transaction`, 'error');
+    }
+  };
+
   return (
     <div className="space-y-8 pb-20">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-6">
@@ -251,6 +306,7 @@ export const AdminPanel = () => {
           { id: 'accounts', label: 'Profile & Credit', icon: Wallet },
           { id: 'transactions', label: 'Insert Activity', icon: Database },
           { id: 'bills', label: 'Manage Bills', icon: ReceiptText },
+          { id: 'approvals', label: 'Asset Approvals', icon: ShieldCheck },
         ].map(tab => (
           <button
             key={tab.id}
@@ -284,16 +340,17 @@ export const AdminPanel = () => {
       {activeView === 'overview' && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {[
-            { icon: Users, label: 'Registered Entities', value: metrics?.activeUsers || '...', color: 'text-indigo-600', bg: 'bg-indigo-50' },
-            { icon: Wallet, label: 'AUM (Deposits)', value: metrics ? `$${(metrics.totalDeposits / 1000).toFixed(1)}k` : '...', color: 'text-emerald-600', bg: 'bg-emerald-50' },
-            { icon: CreditCard, label: 'Aggregated Credit', value: metrics ? `$${metrics.availableCredit.toLocaleString()}` : '...', color: 'text-amber-600', bg: 'bg-amber-50' },
-            { icon: ShieldCheck, label: 'API Integrity', value: metrics?.systemIntegrity || '...', color: 'text-purple-600', bg: 'bg-purple-50' },
+            { icon: Users, label: 'Entities', value: metrics?.activeUsers || '...', color: 'text-indigo-600', bg: 'bg-indigo-50' },
+            { icon: Wallet, label: 'AUM', value: metrics ? `$${(metrics.totalDeposits / 1000).toFixed(1)}k` : '...', color: 'text-emerald-600', bg: 'bg-emerald-50' },
+            { icon: ShieldCheck, label: 'Pending Queue', value: metrics?.pendingTransactions || '0', color: 'text-amber-600', bg: 'bg-amber-50', onClick: () => setActiveView('approvals') },
+            { icon: Activity, label: 'Integrity', value: metrics?.systemIntegrity || '...', color: 'text-purple-600', bg: 'bg-purple-50' },
           ].map((stat, i) => (
             <motion.div 
               key={i}
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              className="sleek-card flex items-center gap-4"
+              onClick={stat.onClick}
+              className={`sleek-card flex items-center gap-4 ${stat.onClick ? 'cursor-pointer hover:border-amber-200' : ''}`}
             >
               <div className={`w-12 h-12 ${stat.bg} ${stat.color} rounded-xl flex items-center justify-center`}>
                 <stat.icon size={24} />
@@ -459,6 +516,43 @@ export const AdminPanel = () => {
                 Apply Master Restrictions
               </button>
             </div>
+
+            <div className="mt-8 pt-8 border-t border-white/10 space-y-4">
+              <h4 className="text-[11px] font-bold uppercase tracking-widest text-slate-400">Target User Deposit Details</h4>
+              <div className="space-y-3">
+                <input 
+                  placeholder="PayPal email" 
+                  value={pp} onChange={e => setPp(e.target.value)}
+                  className="w-full bg-white/5 border border-white/10 rounded-lg p-2 text-xs outline-none focus:bg-white/10"
+                />
+                <input 
+                  placeholder="Cash App tag" 
+                  value={ca} onChange={e => setCa(e.target.value)}
+                  className="w-full bg-white/5 border border-white/10 rounded-lg p-2 text-xs outline-none focus:bg-white/10"
+                />
+                <input 
+                  placeholder="Zelle Info" 
+                  value={zl} onChange={e => setZl(e.target.value)}
+                  className="w-full bg-white/5 border border-white/10 rounded-lg p-2 text-xs outline-none focus:bg-white/10"
+                />
+                <input 
+                   placeholder="Bitcoin Address" 
+                   value={bc} onChange={e => setBc(e.target.value)}
+                   className="w-full bg-white/5 border border-white/10 rounded-lg p-2 text-xs outline-none focus:bg-white/10"
+                />
+                <textarea 
+                   placeholder="Bank Wire Details (ACH/Routing)" 
+                   value={bi} onChange={e => setBi(e.target.value)}
+                   className="w-full bg-white/5 border border-white/10 rounded-lg p-2 text-xs outline-none focus:bg-white/10 h-20"
+                />
+                <button 
+                  onClick={handleUpdateDepositDetails}
+                  className="w-full py-2 bg-white/20 hover:bg-white/30 rounded-lg text-xs font-bold uppercase tracking-wider"
+                >
+                  Secured Injection
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -554,6 +648,64 @@ export const AdminPanel = () => {
               Dispatch Bill to Selected Account
             </button>
           </div>
+        </div>
+      )}
+
+      {activeView === 'approvals' && (
+        <div className="space-y-6">
+           <h3 className="text-xl font-bold text-slate-800">Pending Asset Verifications</h3>
+           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {transactions.filter(t => t.status === 'pending').map(tx => {
+                const acc = accounts.find(a => a.id === tx.accountId);
+                return (
+                  <div key={tx.id} className="sleek-card border-amber-100 bg-amber-50/20">
+                     <div className="flex justify-between items-start mb-4">
+                        <div>
+                           <p className="text-xs font-bold text-amber-600 uppercase tracking-widest mb-1">Queue ID: {tx.id}</p>
+                           <h4 className="font-bold text-slate-800">{tx.description}</h4>
+                        </div>
+                        <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase ${tx.type === 'debit' ? 'bg-red-100 text-red-600' : 'bg-emerald-100 text-emerald-600'}`}>
+                           {tx.type === 'debit' ? 'Outbound' : 'Inbound'}
+                        </span>
+                     </div>
+                     <div className="space-y-2 mb-6">
+                        <div className="flex justify-between text-xs">
+                           <span className="text-slate-500">Source Entity</span>
+                           <span className="font-bold text-slate-800">{acc?.name || 'Unknown'}</span>
+                        </div>
+                        <div className="flex justify-between text-xs">
+                           <span className="text-slate-500">Asset Value</span>
+                           <span className="font-bold text-slate-800">${Math.abs(tx.amount).toLocaleString()}</span>
+                        </div>
+                        <div className="flex justify-between text-xs">
+                           <span className="text-slate-500">Timestamp</span>
+                           <span className="text-slate-600">{new Date(tx.date).toLocaleString()}</span>
+                        </div>
+                     </div>
+                     <div className="flex gap-3">
+                        <button 
+                          onClick={() => handleTxDecision(tx.id, 'approve')}
+                          className="flex-1 py-3 bg-emerald-600 text-white rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-600/10"
+                        >
+                          Approve
+                        </button>
+                        <button 
+                          onClick={() => handleTxDecision(tx.id, 'reject')}
+                          className="flex-1 py-3 bg-red-600 text-white rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-red-700 transition-all shadow-lg shadow-red-600/10"
+                        >
+                          Reject
+                        </button>
+                     </div>
+                  </div>
+                );
+              })}
+              {transactions.filter(t => t.status === 'pending').length === 0 && (
+                <div className="lg:col-span-2 py-20 text-center bg-white border border-dashed border-slate-200 rounded-3xl">
+                   <ShieldCheck size={48} className="text-slate-200 mx-auto mb-4" />
+                   <p className="text-slate-400 font-medium">All systems verified. No pending asset transfers.</p>
+                </div>
+              )}
+           </div>
         </div>
       )}
 

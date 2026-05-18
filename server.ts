@@ -13,6 +13,15 @@ interface User {
   role: 'admin' | 'user';
   ssn?: string;
   phone?: string;
+  photoURL?: string;
+  password?: string; // Adding for mock login validation
+  depositDetails?: {
+    paypal?: string;
+    cashapp?: string;
+    zelle?: string;
+    bitcoin?: string;
+    bankInfo?: string;
+  };
 }
 
 interface Account {
@@ -36,7 +45,8 @@ interface Transaction {
   description: string;
   category: string;
   type: 'debit' | 'credit';
-  status: 'completed' | 'pending';
+  status: 'completed' | 'pending' | 'rejected';
+  toAccountId?: string; // For tracking transfers
 }
 
 interface AdminLog {
@@ -55,14 +65,24 @@ interface Bill {
   accountId?: string;
 }
 
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY,
-  httpOptions: {
-    headers: {
-      'User-Agent': 'aistudio-build',
+let genAIClient: GoogleGenAI | null = null;
+function getGenAI() {
+  if (!genAIClient) {
+    const key = process.env.GEMINI_API_KEY;
+    if (!key) {
+      console.warn("GEMINI_API_KEY is missing. AI features will be disabled.");
     }
+    genAIClient = new GoogleGenAI({
+      apiKey: key || "dummy-key",
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        }
+      }
+    });
   }
-});
+  return genAIClient;
+}
 
 // Mock Database State
 let users: User[] = [
@@ -100,6 +120,15 @@ async function startServer() {
 
   app.use(express.json());
 
+  // Request logger
+  app.use((req, res, next) => {
+    console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+    next();
+  });
+
+  // Health check
+  app.get("/api/health", (req, res) => res.json({ status: "ok" }));
+
   // AUTH API
   app.post("/api/auth/signup", (req, res) => {
     const { email, password, name, ssn, phone } = req.body;
@@ -109,10 +138,12 @@ async function startServer() {
     const newUser: User = {
       uid: Math.random().toString(36).substr(2, 9),
       email,
+      password, // Storing for mock validation
       displayName: name || email.split('@')[0],
       role: email === 'pastorjohn046@gmail.com' ? 'admin' : 'user',
       ssn,
-      phone
+      phone,
+      photoURL: `https://api.dicebear.com/7.x/avataaars/svg?seed=${email}`
     };
     users.push(newUser);
     res.json({ user: newUser });
@@ -121,11 +152,62 @@ async function startServer() {
   app.post("/api/auth/login", (req, res) => {
     const { email, password } = req.body;
     const user = users.find(u => u.email === email);
-    if (!user) {
+    if (!user || (user.password && user.password !== password)) {
       return res.status(401).json({ error: "Invalid credentials" });
     }
-    // In a real app, verify password here
     res.json({ user });
+  });
+
+  app.post("/api/auth/update-profile", (req, res) => {
+    const { uid, displayName, photoURL, phone } = req.body;
+    const user = users.find(u => u.uid === uid);
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    if (displayName) user.displayName = displayName;
+    if (photoURL) user.photoURL = photoURL;
+    if (phone) user.phone = phone;
+
+    res.json({ user });
+  });
+
+  app.post("/api/auth/reset-password", (req, res) => {
+    const { email, newPassword } = req.body;
+    const user = users.find(u => u.email === email);
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    user.password = newPassword;
+    res.json({ success: true });
+  });
+
+  // DEPOSIT DETAILS
+  app.get("/api/users/:uid/deposit-details", (req, res) => {
+    const { uid } = req.params;
+    const user = users.find(u => u.uid === uid);
+    if (!user) return res.status(404).json({ error: "User not found" });
+    res.json(user.depositDetails || {});
+  });
+
+  app.post("/api/admin/users/:uid/deposit-details", (req, res) => {
+    const { uid } = req.params;
+    const { paypal, cashapp, zelle, bitcoin, bankInfo } = req.body;
+    const user = users.find(u => u.uid === uid);
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    user.depositDetails = {
+      paypal,
+      cashapp,
+      zelle,
+      bitcoin,
+      bankInfo
+    };
+
+    adminLogs.unshift({
+      id: Math.random().toString(36).substr(2, 9),
+      msg: `Updated deposit details for user ${user.displayName}`,
+      time: new Date().toLocaleTimeString()
+    });
+
+    res.json(user.depositDetails);
   });
 
   // ADMIN LOGS
@@ -159,12 +241,14 @@ async function startServer() {
     const totalDeposits = accounts.reduce((acc, a) => acc + a.balance, 0);
     const totalTransactions = transactions.length;
     const pendingBills = bills.filter(b => b.status === 'unpaid').length;
+    const pendingTransactions = transactions.filter(t => t.status === 'pending').length;
     const totalCredit = accounts.reduce((acc, a) => acc + (a.creditLimit || 0), 0);
     
     res.json({
       totalDeposits,
       totalTransactions,
       pendingBills,
+      pendingTransactions,
       activeUsers: new Set(accounts.map(a => a.userId)).size,
       systemIntegrity: '99.9%',
       availableCredit: totalCredit
@@ -233,12 +317,85 @@ async function startServer() {
     res.status(201).json(newBill);
   });
 
+  // Admin: Approve/Reject Transaction
+  app.post("/api/admin/transactions/:id/approve", (req, res) => {
+    const { id } = req.params;
+    const tx = transactions.find(t => t.id === id);
+    if (!tx) return res.status(404).json({ error: "Transaction not found" });
+    if (tx.status !== 'pending') return res.status(400).json({ error: "Transaction already processed" });
+
+    const account = accounts.find(a => a.id === tx.accountId);
+    if (!account) return res.status(404).json({ error: "Account not found" });
+
+    tx.status = 'completed';
+    
+    // If it was a credit, we update balance now.
+    // If it was a debit, balance was already decremented at initiation to "hold" funds.
+    if (tx.type === 'credit') {
+      account.balance += tx.amount;
+    }
+
+    // Handle the other side of a persistent internal transfer if exists
+    if (tx.toAccountId) {
+      const toAcc = accounts.find(a => a.id === tx.toAccountId);
+      if (toAcc) {
+          // This logic is simplified: for transfers, we usually have two transactions.
+          // The 'credit' transaction for the recipient would also be pending.
+          // We need to find its pair.
+          const pair = transactions.find(t => t.accountId === tx.toAccountId && t.amount === Math.abs(tx.amount) && t.status === 'pending');
+          if (pair) {
+            pair.status = 'completed';
+            toAcc.balance += pair.amount;
+          }
+      }
+    }
+
+    adminLogs.unshift({
+      id: Math.random().toString(36).substr(2, 9),
+      msg: `Approved transaction ${tx.id} for ${account.name}`,
+      time: new Date().toLocaleTimeString()
+    });
+
+    res.json({ success: true, transaction: tx });
+  });
+
+  app.post("/api/admin/transactions/:id/reject", (req, res) => {
+    const { id } = req.params;
+    const tx = transactions.find(t => t.id === id);
+    if (!tx) return res.status(404).json({ error: "Transaction not found" });
+    if (tx.status !== 'pending') return res.status(400).json({ error: "Transaction already processed" });
+
+    const account = accounts.find(a => a.id === tx.accountId);
+    if (!account) return res.status(404).json({ error: "Account not found" });
+
+    tx.status = 'rejected';
+
+    // If it was a debit, we need to refund the held balance
+    if (tx.type === 'debit') {
+      account.balance += Math.abs(tx.amount);
+    }
+
+    // Handle pair
+    if (tx.toAccountId) {
+      const pair = transactions.find(t => t.accountId === tx.toAccountId && t.amount === Math.abs(tx.amount) && t.status === 'pending');
+      if (pair) pair.status = 'rejected';
+    }
+
+    adminLogs.unshift({
+      id: Math.random().toString(36).substr(2, 9),
+      msg: `Rejected transaction ${tx.id} for ${account.name}`,
+      time: new Date().toLocaleTimeString()
+    });
+
+    res.json({ success: true, transaction: tx });
+  });
+
   app.post("/api/transfers", (req, res) => {
     const { fromId, toId, amount, description } = req.body;
     const fromAcc = accounts.find(a => a.id === fromId);
     const toAcc = accounts.find(a => a.id === toId);
 
-    if (fromAcc?.status === 'disabled' || toAcc?.status === 'disabled') {
+    if (fromAcc?.status === 'disabled' || (toAcc && toAcc.status === 'disabled')) {
        return res.status(403).json({ error: "Transfer failed: One or more accounts are disabled" });
     }
 
@@ -246,8 +403,8 @@ async function startServer() {
       return res.status(403).json({ error: "Transfer failed: Recipient account has deposit restrictions" });
     }
     
-    // Simulating a transfer to another account or external
     if (fromAcc && fromAcc.balance >= amount) {
+      // Hold funds immediately
       fromAcc.balance -= amount;
       
       const newTx: Transaction = {
@@ -255,31 +412,64 @@ async function startServer() {
         accountId: fromId,
         date: new Date().toISOString(),
         amount: -amount,
-        description: description || `Transfer to ${toId}`,
+        description: description || `Transfer Request to ${toId}`,
         category: 'Transfer',
         type: 'debit',
-        status: 'completed'
+        status: 'pending',
+        toAccountId: toId
       };
       transactions.unshift(newTx);
       
-      // If internal transfer
-      const toAcc = accounts.find(a => a.id === toId);
+      // If internal transfer, create a pending credit for recipient
       if (toAcc) {
-        toAcc.balance += amount;
         transactions.unshift({
-          ...newTx,
           id: `t${Date.now() + 1}`,
           accountId: toId,
+          date: new Date().toISOString(),
           amount: amount,
+          description: `Incoming Transfer Request from ${fromAcc.name}`,
+          category: 'Transfer',
           type: 'credit',
-          status: 'completed'
+          status: 'pending'
         });
       }
       
-      res.json({ success: true, fromAcc });
+      adminLogs.unshift({
+        id: Math.random().toString(36).substr(2, 9),
+        msg: `New Pending Transfer from ${fromAcc.name} to ${toId}`,
+        time: new Date().toLocaleTimeString()
+      });
+
+      res.json({ success: true, transaction: newTx });
     } else {
       res.status(400).json({ error: "Insufficient funds" });
     }
+  });
+
+  app.post("/api/deposits", (req, res) => {
+    const { accountId, amount, description } = req.body;
+    const account = accounts.find(a => a.id === accountId);
+    if (!account) return res.status(404).json({ error: "Account not found" });
+
+    const newTx: Transaction = {
+      id: `t${Date.now()}`,
+      accountId,
+      date: new Date().toISOString(),
+      amount: amount,
+      description: description || 'Digital Asset Deposit Request',
+      category: 'Deposit',
+      type: 'credit',
+      status: 'pending'
+    };
+    transactions.unshift(newTx);
+
+    adminLogs.unshift({
+      id: Math.random().toString(36).substr(2, 9),
+      msg: `New Pending Deposit from user ${account.userId} to ${account.name}`,
+      time: new Date().toLocaleTimeString()
+    });
+
+    res.status(201).json(newTx);
   });
 
   app.post("/api/bills/pay", (req, res) => {
@@ -288,25 +478,32 @@ async function startServer() {
     const account = accounts.find(a => a.id === accountId);
 
     if (account?.status === 'disabled') {
-      return res.status(403).json({ error: "Cannot pay bills from a disabled account" });
+       return res.status(403).json({ error: "Cannot pay bills from a disabled account" });
     }
 
     if (bill && account && account.balance >= bill.amount) {
       account.balance -= bill.amount;
-      bill.status = 'paid';
+      bill.status = 'pending' as any; // Temporary pending status for the bill too? Or just paid.
       
-      transactions.unshift({
+      const newTx: Transaction = {
         id: `t${Date.now()}`,
         accountId: accountId,
         date: new Date().toISOString(),
         amount: -bill.amount,
-        description: `Bill Pay: ${bill.name}`,
+        description: `Pending Bill Pay: ${bill.name}`,
         category: bill.category,
         type: 'debit',
-        status: 'completed'
+        status: 'pending'
+      };
+      transactions.unshift(newTx);
+
+      adminLogs.unshift({
+        id: Math.random().toString(36).substr(2, 9),
+        msg: `New Pending Bill Payment from ${account.name} for ${bill.name}`,
+        time: new Date().toLocaleTimeString()
       });
       
-      res.json({ success: true, bill, account });
+      res.json({ success: true, transaction: newTx });
     } else {
       res.status(400).json({ error: "Could not process bill payment" });
     }
@@ -314,7 +511,9 @@ async function startServer() {
 
   app.post("/api/ai/advisor", async (req, res) => {
     try {
-      const { prompt, history } = req.body;
+      const { prompt } = req.body;
+      const key = process.env.GEMINI_API_KEY;
+      if (!key) return res.status(503).json({ error: "AI Assistant unavailable: Missing API Key" });
       
       // Contextual data
       const context = `
@@ -323,7 +522,7 @@ async function startServer() {
         Upcoming Bills: ${JSON.stringify(bills.filter(b => b.status === 'unpaid'))}
       `;
 
-      const response = await ai.models.generateContent({
+      const response = await getGenAI().models.generateContent({
         model: "gemini-3-flash-preview",
         contents: prompt,
         config: {
@@ -336,7 +535,7 @@ async function startServer() {
 
       res.json({ text: response.text });
     } catch (error) {
-      console.error(error);
+      console.error("AI Error:", error);
       res.status(500).json({ error: "AI Assistant unavailable" });
     }
   });
@@ -356,9 +555,15 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
+  try {
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`Server running on http://localhost:${PORT}`);
+    });
+  } catch (listenError) {
+    console.error("Server failed to listen on port:", listenError);
+  }
 }
 
-startServer();
+startServer().catch(err => {
+  console.error("Fatal server startup error:", err);
+});

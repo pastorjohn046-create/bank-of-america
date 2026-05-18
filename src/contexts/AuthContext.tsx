@@ -16,6 +16,8 @@ interface AuthContextType {
   signOut: () => Promise<void>;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string, name: string, ssn: string, phone: string) => Promise<void>;
+  updateProfile: (data: { displayName?: string; photoURL?: string; phone?: string }) => Promise<void>;
+  resetPassword: (email: string, newPassword: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -26,6 +28,8 @@ const AuthContext = createContext<AuthContextType>({
   signOut: async () => {},
   signIn: async () => {},
   signUp: async () => {},
+  updateProfile: async () => {},
+  resetPassword: async () => {},
 });
 
 export const useAuth = () => useContext(AuthContext);
@@ -98,8 +102,39 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.removeItem('new_age_user');
   };
 
+  const updateProfile = async (data: { displayName?: string; photoURL?: string; phone?: string }) => {
+    if (!user) return;
+    const response = await fetch('/api/auth/update-profile', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ uid: user.uid, ...data }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Update failed');
+    }
+
+    const { user: updatedUser } = await response.json();
+    setUser(updatedUser);
+    localStorage.setItem('new_age_user', JSON.stringify(updatedUser));
+  };
+
+  const resetPassword = async (email: string, newPassword: string) => {
+    const response = await fetch('/api/auth/reset-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, newPassword }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Password reset failed');
+    }
+  };
+
   return (
-    <AuthContext.Provider value={{ user, loading, isAdmin, userRole, signOut, signIn, signUp }}>
+    <AuthContext.Provider value={{ user, loading, isAdmin, userRole, signOut, signIn, signUp, updateProfile, resetPassword }}>
       {children}
     </AuthContext.Provider>
   );

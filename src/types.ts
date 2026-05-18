@@ -20,7 +20,7 @@ export interface Transaction {
   description: string;
   category: string;
   type: 'debit' | 'credit';
-  status: 'completed' | 'pending';
+  status: 'completed' | 'pending' | 'rejected';
 }
 
 export interface Bill {
@@ -33,8 +33,17 @@ export interface Bill {
 }
 
 export interface User {
-  id: string;
-  name: string;
+  uid: string;
+  displayName: string;
   email: string;
-  avatar?: string;
+  photoURL?: string;
+  role: 'admin' | 'user';
+  phone?: string;
+  depositDetails?: {
+    paypal?: string;
+    cashapp?: string;
+    zelle?: string;
+    bitcoin?: string;
+    bankInfo?: string;
+  };
 }

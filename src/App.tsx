@@ -19,11 +19,12 @@ import {
   ShieldAlert
 } from 'lucide-react';
 import { api } from './services/api';
-import { Account, Transaction, Bill } from './types';
+import { Account, Transaction, Bill, User } from './types';
 import { BalanceCard } from './components/dashboard/BalanceCard';
 import { TransactionList } from './components/dashboard/TransactionList';
 import { ExecutiveAdvisor } from './components/ai/ExecutiveAdvisor';
 import { TransferModal } from './components/modals/TransferModal';
+import { DepositModal } from './components/modals/DepositModal';
 import { SpendingChart, NetWorthChart } from './components/dashboard/AnalyticsCharts';
 import { AdminPanel } from './components/admin/AdminPanel';
 import { SplashScreen } from './components/ui/SplashScreen';
@@ -43,19 +44,69 @@ import { AuthScreen } from './components/auth/AuthScreen';
 import { ShieldCheck, LogOut as LogOutIcon, Star as StarIcon } from 'lucide-react';
 
 export default function App() {
-  const { user, loading, isAdmin, signOut } = useAuth();
+  const { user, loading, isAdmin, signOut, updateProfile, resetPassword } = useAuth();
   const [activeTab, setActiveTab ] = useState('dashboard');
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [bills, setBills] = useState<Bill[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showSplash, setShowSplash] = useState(true);
+  
+  // Profile State
+  const [editName, setEditName] = useState(user?.displayName || '');
+  const [editPhone, setEditPhone] = useState(user?.phone || '');
+  const [editPhoto, setEditPhoto] = useState(user?.photoURL || '');
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [resetPassEmail, setResetPassEmail] = useState(user?.email || '');
+  const [newPass, setNewPass] = useState('');
+
+  useEffect(() => {
+    if (user) {
+      setEditName(user.displayName || '');
+      setEditPhone(user.phone || '');
+      setEditPhoto(user.photoURL || '');
+      setResetPassEmail(user.email || '');
+    }
+  }, [user]);
+
+  const handleUpdateProfile = async () => {
+    setSavingProfile(true);
+    try {
+      await updateProfile({ displayName: editName, phone: editPhone, photoURL: editPhoto });
+      alert('Executive Profile Secured Successfully.');
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
+  const handleResetPass = async () => {
+    if (!newPass) return alert('Enter a new security credential.');
+    try {
+      await resetPassword(resetPassEmail, newPass);
+      alert('Security Credentials Updated.');
+      setNewPass('');
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
   const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
+  const [transferModalInitialType, setTransferModalInitialType] = useState<'internal' | 'external'>('internal');
+  const [transferModalLocked, setTransferModalLocked] = useState(false);
+  const [isDepositModalOpen, setIsDepositModalOpen] = useState(false);
 
   useEffect(() => {
     const timer = setTimeout(() => setShowSplash(false), 2000);
     return () => clearTimeout(timer);
   }, []);
+
+  const openTransferModal = (type: 'internal' | 'external' = 'internal', locked: boolean = false) => {
+    setTransferModalInitialType(type);
+    setTransferModalLocked(locked);
+    setIsTransferModalOpen(true);
+  };
 
   const fetchData = async () => {
     setIsLoading(true);
@@ -241,7 +292,12 @@ export default function App() {
                 {/* Credit Cards / Accounts Info */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   {accounts.slice(0, 2).map((acc, idx) => (
-                    <BalanceCard key={acc.id} account={acc} />
+                    <BalanceCard 
+                      key={acc.id} 
+                      account={acc} 
+                      onSend={() => setActiveTab('transfers')}
+                      onAdd={() => setIsDepositModalOpen(true)}
+                    />
                   ))}
                 </div>
 
@@ -249,44 +305,6 @@ export default function App() {
               </section>
 
               <section className="col-span-12 lg:col-span-4 space-y-4 lg:space-y-6">
-                {/* Quick Send */}
-                <div className="sleek-card">
-                  <h3 className="font-bold text-slate-800 mb-4">Quick Send</h3>
-                  <div className="flex gap-3 mb-6 overflow-x-auto pb-2">
-                    {[1, 2, 3].map(i => (
-                      <div key={i} className="flex flex-col items-center gap-2 flex-shrink-0 cursor-pointer group">
-                        <div className="w-12 h-12 rounded-full border border-slate-100 p-0.5 flex items-center justify-center group-hover:border-indigo-500 transition-colors">
-                          <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=P${i}`} className="rounded-full" alt="User" />
-                        </div>
-                        <span className="text-[10px] font-bold text-slate-400 group-hover:text-slate-800">User {i}</span>
-                      </div>
-                    ))}
-                    <div className="flex flex-col items-center gap-2 flex-shrink-0 cursor-pointer group">
-                      <div className="w-12 h-12 rounded-full border border-slate-100 flex items-center justify-center bg-slate-50 group-hover:bg-indigo-50 transition-colors">
-                        <Plus size={20} className="text-slate-400 group-hover:text-indigo-600" />
-                      </div>
-                      <span className="text-[10px] font-bold text-slate-400">New</span>
-                    </div>
-                  </div>
-                  
-                  <div className="space-y-4">
-                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Enter Amount</label>
-                    <div className="relative">
-                      <span className="absolute left-4 top-1/2 -translate-y-1/2 font-bold text-slate-800">$</span>
-                      <input 
-                        type="text" 
-                        placeholder="0.00" 
-                        className="w-full pl-8 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-600/5 focus:border-indigo-600 transition-all"
-                      />
-                    </div>
-                    <button 
-                      onClick={() => setIsTransferModalOpen(true)}
-                      className="w-full sleek-button-primary"
-                    >
-                      Transfer Money
-                    </button>
-                  </div>
-                </div>
 
                 {/* Upcoming Bill - Dark Version */}
                 {bills.find(b => b.status === 'unpaid') && (
@@ -337,38 +355,38 @@ export default function App() {
                       <p className="text-slate-500 mt-1">Send money across the world instantly.</p>
                    </div>
                    <button 
-                      onClick={() => setIsTransferModalOpen(true)}
+                      onClick={() => openTransferModal('internal')}
                       className="sleek-button-primary flex items-center gap-2"
                    >
                      <Plus size={18} /> New Transfer
                    </button>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-12">
+                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-12">
                    <div 
-                      onClick={() => setIsTransferModalOpen(true)}
-                      className="sleek-card hover:border-indigo-200 cursor-pointer transition-all group"
+                      onClick={() => openTransferModal('internal', true)}
+                      className="sleek-card hover:border-blue-300 cursor-pointer transition-all group border-2 border-slate-100"
                     >
-                      <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center mb-6 group-hover:bg-indigo-600 group-hover:text-white transition-all">
+                      <div className="w-12 h-12 bg-blue-50 text-blue-900 rounded-xl flex items-center justify-center mb-6 group-hover:bg-blue-900 group-hover:text-white transition-all">
                         <Users size={24} />
                       </div>
-                      <h3 className="text-xl font-bold mb-2 uppercase tracking-wide">Elite Contacts</h3>
+                      <h3 className="text-xl font-bold mb-2 uppercase tracking-wide text-blue-900">Elite Contacts</h3>
                       <p className="text-sm text-slate-500 mb-8 leading-relaxed">Instantly send funds to anyone on the NEW AGE OF AMERICA network with zero fees.</p>
-                      <div className="flex items-center gap-2 text-indigo-600 font-bold text-xs uppercase tracking-wider">
-                        Select Contact <ArrowRight size={14} />
+                      <div className="flex items-center gap-2 text-blue-900 font-bold text-xs uppercase tracking-wider">
+                        Select Member <ArrowRight size={14} />
                       </div>
                    </div>
                    
                    <div 
-                      onClick={() => setIsTransferModalOpen(true)}
-                      className="sleek-card hover:border-indigo-200 cursor-pointer transition-all group"
+                      onClick={() => openTransferModal('external', true)}
+                      className="sleek-card hover:border-red-200 cursor-pointer transition-all group border-2 border-slate-100"
                     >
-                      <div className="w-12 h-12 bg-slate-100 text-slate-600 rounded-xl flex items-center justify-center mb-6 group-hover:bg-slate-900 group-hover:text-white transition-all">
+                      <div className="w-12 h-12 bg-red-50 text-red-600 rounded-xl flex items-center justify-center mb-6 group-hover:bg-red-600 group-hover:text-white transition-all">
                         <Landmark size={24} />
                       </div>
-                      <h3 className="text-xl font-bold mb-2">External Bank</h3>
+                      <h3 className="text-xl font-bold mb-2 uppercase tracking-wide text-red-600">External Bank</h3>
                       <p className="text-sm text-slate-500 mb-8 leading-relaxed">Transfer to other financial institutions worldwide via wire or ACH.</p>
-                      <div className="flex items-center gap-2 text-slate-800 font-bold text-xs uppercase tracking-wider">
+                      <div className="flex items-center gap-2 text-red-600 font-bold text-xs uppercase tracking-wider">
                         Setup Recipient <ArrowRight size={14} />
                       </div>
                    </div>
@@ -511,37 +529,73 @@ export default function App() {
                <h2 className="text-3xl font-bold mb-10 tracking-tight text-slate-800">Preferences</h2>
                <div className="space-y-8">
                   <div className="sleek-card">
-                     <h3 className="font-bold text-slate-800 border-b border-slate-100 pb-4 mb-8">Personal Details</h3>
+                     <h3 className="font-bold text-slate-800 border-b border-slate-100 pb-4 mb-8 text-blue-900 uppercase tracking-tighter">Executive Personal Details</h3>
                      <div className="flex items-center gap-8 mb-10">
                         <div className="relative group shrink-0">
-                          <div className="w-24 h-24 rounded-2xl bg-indigo-50 border-4 border-slate-100 flex items-center justify-center font-bold text-2xl text-indigo-600">
-                            {user.displayName?.charAt(0) || user.email?.charAt(0).toUpperCase()}
+                          <div className="w-24 h-24 rounded-2xl bg-indigo-50 border-4 border-slate-100 flex items-center justify-center overflow-hidden font-bold text-2xl text-indigo-600">
+                            {editPhoto ? (
+                              <img src={editPhoto} className="w-full h-full object-cover" alt="Profile" />
+                            ) : (
+                              user.displayName?.charAt(0) || user.email?.charAt(0).toUpperCase()
+                            )}
                           </div>
-                          <div className="absolute inset-0 bg-black/40 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer">
+                          <button 
+                            onClick={() => {
+                              const url = prompt('Enter a direct URL for your profile image (or leave empty to use avatar service):');
+                              if (url !== null) setEditPhoto(url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.email}`);
+                            }}
+                            className="absolute inset-0 bg-black/40 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer"
+                          >
                             <span className="text-white text-[10px] font-bold uppercase tracking-widest">Update</span>
-                          </div>
+                          </button>
                         </div>
                         <div>
                            <p className="text-lg font-bold text-slate-800 capitalize">{user.displayName || 'Member'}</p>
-                           <p className="text-sm text-slate-500">{isAdmin ? 'Executive Administrator' : 'Premium Member since 2024'}</p>
-                           <button className="text-indigo-600 text-xs font-bold uppercase tracking-widest mt-3 hover:underline">Edit Membership</button>
+                           <p className="text-sm text-slate-500">{isAdmin ? 'Executive Administrator' : 'Premium Member'}</p>
+                           <button onClick={() => alert('Membership ID: ' + user.uid)} className="text-indigo-600 text-xs font-bold uppercase tracking-widest mt-3 hover:underline">Membership Info</button>
                         </div>
                      </div>
                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                         <div className="space-y-2">
                            <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Display Name</label>
-                           <input type="text" value={user.displayName || ''} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl font-semibold" readOnly />
+                           <input 
+                             type="text" 
+                             value={editName} 
+                             onChange={(e) => setEditName(e.target.value)}
+                             className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl font-semibold outline-none focus:bg-white transition-all" 
+                           />
                         </div>
                         <div className="space-y-2">
-                          <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Email Address</label>
-                          <input type="email" value={user.email || ''} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl font-semibold" readOnly />
+                          <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Phone Link</label>
+                          <input 
+                            type="tel" 
+                            value={editPhone} 
+                            onChange={(e) => setEditPhone(e.target.value)}
+                            className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl font-semibold outline-none focus:bg-white transition-all" 
+                          />
+                        </div>
+                        <div className="space-y-2 sm:col-span-2">
+                          <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Profile Photo URL</label>
+                          <input 
+                            type="text" 
+                            value={editPhoto} 
+                            onChange={(e) => setEditPhoto(e.target.value)}
+                            placeholder="Direct image link"
+                            className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl font-semibold outline-none focus:bg-white transition-all" 
+                          />
                         </div>
                      </div>
-                     <button className="sleek-button-primary mt-10 w-full sm:w-auto">Save Changes</button>
+                     <button 
+                       onClick={handleUpdateProfile}
+                       disabled={savingProfile}
+                       className="sleek-button-primary mt-10 w-full sm:w-auto"
+                     >
+                       {savingProfile ? 'Sealing...' : 'Secure Profile Changes'}
+                     </button>
                   </div>
 
                   <div className="sleek-card">
-                     <h3 className="font-bold text-slate-800 border-b border-slate-100 pb-4 mb-6">Privacy & Security</h3>
+                     <h3 className="font-bold text-slate-800 border-b border-slate-100 pb-4 mb-6 uppercase tracking-widest text-[11px] text-red-600">Executive Security Protocol</h3>
                      <div className="divide-y divide-slate-100">
                         <div className="py-6">
                            <div className="flex items-center justify-between mb-4">
@@ -551,14 +605,21 @@ export default function App() {
                               </div>
                               <ShieldAlert size={20} className="text-amber-500" />
                            </div>
-                           <button 
-                             onClick={() => {
-                                alert('A secure verification link has been sent to your registered institutional primary email address.');
-                             }}
-                             className="text-xs font-bold text-indigo-600 bg-indigo-50 px-4 py-2 rounded-lg hover:bg-indigo-100 transition-colors uppercase tracking-widest"
-                           >
-                             Reset via Email
-                           </button>
+                           <div className="space-y-4">
+                              <input 
+                                 type="password" 
+                                 value={newPass}
+                                 onChange={(e) => setNewPass(e.target.value)}
+                                 placeholder="New Security Credential"
+                                 className="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-xl font-bold font-mono outline-none focus:bg-white transition-all"
+                               />
+                              <button 
+                                 onClick={handleResetPass}
+                                 className="text-xs font-bold text-red-600 bg-red-50 px-6 py-3 rounded-xl hover:bg-red-600 hover:text-white transition-all uppercase tracking-widest"
+                              >
+                                 Execute Reset
+                              </button>
+                           </div>
                         </div>
                         <div className="py-6 flex items-center justify-between">
                            <div>
@@ -615,6 +676,17 @@ export default function App() {
           <TransferModal 
             accounts={accounts} 
             onClose={() => setIsTransferModalOpen(false)} 
+            onSuccess={fetchData}
+            initialType={transferModalInitialType}
+            lockType={transferModalLocked}
+          />
+        )}
+
+        {isDepositModalOpen && user && (
+          <DepositModal 
+            user={user}
+            accounts={accounts}
+            onClose={() => setIsDepositModalOpen(false)} 
             onSuccess={fetchData}
           />
         )}

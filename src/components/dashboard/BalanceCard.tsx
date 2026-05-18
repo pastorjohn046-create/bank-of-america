@@ -8,9 +8,11 @@ interface BalanceCardProps {
   account: Account;
   isActive?: boolean;
   onClick?: () => void;
+  onSend?: (e: React.MouseEvent) => void;
+  onAdd?: (e: React.MouseEvent) => void;
 }
 
-export const BalanceCard: React.FC<BalanceCardProps> = ({ account, isActive, onClick }) => {
+export const BalanceCard: React.FC<BalanceCardProps> = ({ account, isActive, onClick, onSend, onAdd }) => {
   return (
     <motion.div
       whileHover={{ y: -4 }}
@@ -40,12 +42,22 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({ account, isActive, onC
       </div>
       
       <div className="mt-6 flex gap-3">
-        <button className={`flex-1 flex items-center justify-center gap-1 text-xs font-bold uppercase py-2.5 rounded-lg transition-all ${
+        <button 
+          onClick={(e) => {
+            e.stopPropagation();
+            onSend?.(e);
+          }}
+          className={`flex-1 flex items-center justify-center gap-1 text-xs font-bold uppercase py-2.5 rounded-lg transition-all ${
           account.type === 'savings' ? 'bg-white text-brand-primary hover:bg-white/90' : 'bg-brand-primary text-white hover:bg-brand-secondary'
         }`}>
           <ArrowUpRight size={14} /> Send
         </button>
-        <button className={`flex-1 flex items-center justify-center gap-1 text-xs font-bold uppercase py-2.5 rounded-lg transition-all ${
+        <button 
+          onClick={(e) => {
+            e.stopPropagation();
+            onAdd?.(e);
+          }}
+          className={`flex-1 flex items-center justify-center gap-1 text-xs font-bold uppercase py-2.5 rounded-lg transition-all ${
           account.type === 'savings' ? 'bg-white/10 text-white hover:bg-white/20' : 'bg-slate-50 text-text-main hover:bg-slate-100'
         }`}>
           <ArrowDownLeft size={14} /> Add
