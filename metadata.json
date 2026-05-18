@@ -1,0 +1,8 @@
+{
+  "name": "NEW AGE OF AMERICA",
+  "description": "A high-end, minimalist modern banking platform for elite financial management, featuring an advanced Admin Control Center and executive-tier security.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

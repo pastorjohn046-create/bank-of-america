@@ -1,0 +1,46 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  
+  --color-brand-primary: #1e3a8a;
+  --color-brand-secondary: #dc2626;
+  --color-surface-light: #f8fafc;
+  --color-surface-white: #ffffff;
+  --color-text-main: #1e293b;
+  --color-text-muted: #64748b;
+  --color-border-subtle: #e2e8f0;
+}
+
+@layer base {
+  body {
+    @apply bg-surface-light text-text-main font-sans antialiased;
+  }
+}
+
+.sleek-card {
+  @apply bg-white border border-border-subtle rounded-2xl p-6 shadow-sm;
+}
+
+.sleek-button-primary {
+  @apply bg-brand-primary text-white px-6 py-3 rounded-xl hover:bg-brand-secondary transition-all font-semibold shadow-lg shadow-brand-primary/20;
+}
+
+.sleek-button-secondary {
+  @apply bg-white border border-border-subtle px-6 py-3 rounded-xl hover:bg-surface-light transition-all font-semibold text-text-main;
+}
+
+.sleek-nav-item {
+  @apply flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-colors;
+}
+
+.sleek-nav-item-active {
+  @apply bg-brand-primary/10 text-brand-primary flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-colors;
+}
+
+.sleek-nav-item-inactive {
+  @apply text-text-muted hover:bg-surface-light flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-colors;
+}
+

@@ -1,0 +1,625 @@
+import { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
+import { 
+  LayoutDashboard, 
+  ArrowLeftRight, 
+  ReceiptText, 
+  PieChart, 
+  Settings, 
+  LogOut, 
+  Bell, 
+  Search,
+  Plus,
+  TrendingUp,
+  CreditCard,
+  History,
+  ArrowRight,
+  Users,
+  Landmark,
+  ShieldAlert
+} from 'lucide-react';
+import { api } from './services/api';
+import { Account, Transaction, Bill } from './types';
+import { BalanceCard } from './components/dashboard/BalanceCard';
+import { TransactionList } from './components/dashboard/TransactionList';
+import { ExecutiveAdvisor } from './components/ai/ExecutiveAdvisor';
+import { TransferModal } from './components/modals/TransferModal';
+import { SpendingChart, NetWorthChart } from './components/dashboard/AnalyticsCharts';
+import { AdminPanel } from './components/admin/AdminPanel';
+import { SplashScreen } from './components/ui/SplashScreen';
+
+const SidebarItem = ({ icon: Icon, label, active, onClick }: any) => (
+  <button 
+    onClick={onClick}
+    className={`w-full ${active ? 'sleek-nav-item-active' : 'sleek-nav-item-inactive'}`}
+  >
+    <Icon size={20} />
+    <span className="font-semibold">{label}</span>
+  </button>
+);
+
+import { useAuth } from './contexts/AuthContext';
+import { AuthScreen } from './components/auth/AuthScreen';
+import { ShieldCheck, LogOut as LogOutIcon, Star as StarIcon } from 'lucide-react';
+
+export default function App() {
+  const { user, loading, isAdmin, signOut } = useAuth();
+  const [activeTab, setActiveTab ] = useState('dashboard');
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [bills, setBills] = useState<Bill[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [showSplash, setShowSplash] = useState(true);
+  const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setShowSplash(false), 2000);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const fetchData = async () => {
+    setIsLoading(true);
+    try {
+      const [accData, txData, billData] = await Promise.all([
+        api.getAccounts(),
+        api.getTransactions(),
+        api.getBills()
+      ]);
+      setAccounts(accData);
+      setTransactions(txData);
+      setBills(billData);
+    } catch (error) {
+      console.error('Failed to fetch data', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (user) {
+      fetchData();
+    }
+  }, [user]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <motion.div 
+          animate={{ rotate: 360 }}
+          transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+          className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full"
+        />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <AuthScreen />;
+  }
+
+  const totalBalance = accounts.reduce((acc, curr) => acc + curr.balance, 0);
+
+  return (
+    <div className="flex flex-col lg:flex-row h-screen bg-slate-50 overflow-hidden font-sans text-slate-900">
+      {/* Sidebar - Desktop Only */}
+      <aside className="hidden lg:flex w-64 bg-white border-r border-slate-200 flex-col">
+        <div className="p-8">
+          <div className="flex flex-col gap-1 mb-10">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-blue-900 rounded-full flex items-center justify-center shadow-lg shadow-blue-900/20 border-2 border-white">
+                 <StarIcon size={18} className="text-white" fill="currentColor" />
+              </div>
+              <div className="flex flex-col">
+                <span className="font-black text-sm tracking-[0.2em] text-blue-900 uppercase leading-none">New Age</span>
+                <span className="font-black text-sm tracking-[0.2em] text-red-600 uppercase">Of America</span>
+              </div>
+            </div>
+            <p className="text-[8px] font-bold text-slate-400 uppercase tracking-[0.3em] mt-2">Executive Portal</p>
+          </div>
+
+          <nav className="space-y-1">
+            <SidebarItem 
+              icon={LayoutDashboard} 
+              label="Dashboard" 
+              active={activeTab === 'dashboard'} 
+              onClick={() => setActiveTab('dashboard')}
+            />
+            <SidebarItem 
+              icon={ArrowLeftRight} 
+              label="Transfers" 
+              active={activeTab === 'transfers'} 
+              onClick={() => setActiveTab('transfers')}
+            />
+            <SidebarItem 
+              icon={ReceiptText} 
+              label="Bill Pay" 
+              active={activeTab === 'bills'} 
+              onClick={() => setActiveTab('bills')}
+            />
+            <SidebarItem 
+              icon={PieChart} 
+              label="Analytics" 
+              active={activeTab === 'analytics'} 
+              onClick={() => setActiveTab('analytics')}
+            />
+            <SidebarItem 
+              icon={Settings} 
+              label="Settings" 
+              active={activeTab === 'settings'} 
+              onClick={() => setActiveTab('settings')}
+            />
+            {isAdmin && (
+              <SidebarItem 
+                icon={ShieldAlert} 
+                label="Admin" 
+                active={activeTab === 'admin'} 
+                onClick={() => setActiveTab('admin')} 
+              />
+            )}
+          </nav>
+        </div>
+
+        <div className="mt-auto p-6 border-t border-slate-100">
+          <div className="bg-slate-900 rounded-2xl p-6 text-white relative overflow-hidden group">
+            <div className="relative z-10">
+              <p className="text-xs text-slate-400 mb-1">Portfolio Credit</p>
+              <p className="text-lg font-bold">${accounts.reduce((acc, a) => acc + (a.creditLimit || 0), 0).toLocaleString()}.00</p>
+              <div className="w-full bg-slate-700 h-1.5 rounded-full mt-3 overflow-hidden">
+                <div className="bg-indigo-500 h-full w-2/3" />
+              </div>
+            </div>
+          </div>
+          <button 
+            onClick={signOut}
+            className="w-full flex items-center gap-3 px-2 py-6 text-slate-400 hover:text-red-500 transition-colors font-semibold text-sm"
+          >
+            <LogOut size={20} />
+            <span>Sign Out</span>
+          </button>
+        </div>
+      </aside>
+
+      {/* Main Content */}
+      <main className="flex-1 overflow-y-auto flex flex-col pb-20 lg:pb-0">
+        {/* Header */}
+        <header className="h-16 lg:h-20 bg-white border-b border-slate-200 px-6 lg:px-8 flex items-center justify-between sticky top-0 z-10">
+          <div className="flex flex-col">
+             <h1 className="text-lg lg:text-xl font-bold text-slate-800 tracking-tight">
+               {activeTab === 'admin' ? 'Executive Control' : `Good Morning, ${user.displayName?.split(' ')[0] || 'Member'}`}
+             </h1>
+             <p className="hidden sm:block text-xs lg:text-sm text-slate-500">
+               Market Status: <span className="text-emerald-500 font-bold uppercase tracking-widest text-[10px]">Open</span>
+             </p>
+          </div>
+          
+          <div className="flex items-center gap-2 lg:gap-4">
+            <div className="relative group hidden md:block">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-indigo-600 transition-colors" size={18} />
+              <input 
+                type="text" 
+                placeholder="Search..." 
+                className="bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600/5 focus:border-indigo-600 transition-all w-48 focus:w-64"
+              />
+            </div>
+            <button className="w-9 h-9 lg:w-10 lg:h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 relative hover:bg-slate-200 transition-colors">
+              <Bell size={18} lg:size={20} />
+              <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 border-2 border-white rounded-full" />
+            </button>
+            <div className="flex items-center gap-3 pl-2 lg:pl-4 border-l border-slate-200">
+              <div className="text-right hidden sm:block">
+                <p className="text-sm font-semibold text-slate-800 capitalize">{user.displayName || 'Member'}</p>
+                <p className="text-xs text-slate-500">{isAdmin ? 'Executive Admin' : 'Premium Member'}</p>
+              </div>
+              <div className="w-9 h-9 lg:w-10 lg:h-10 rounded-full bg-indigo-100 overflow-hidden border border-indigo-200 shadow-sm cursor-pointer hover:scale-105 transition-transform flex items-center justify-center font-bold text-indigo-600">
+                {user.photoURL ? (
+                  <img src={user.photoURL} alt="Avatar" />
+                ) : (
+                  user.displayName?.charAt(0) || user.email?.charAt(0).toUpperCase()
+                )}
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <div className="p-4 lg:p-8 content-start">
+          {activeTab === 'admin' && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+            >
+              <AdminPanel />
+            </motion.div>
+          )}
+
+          {activeTab === 'dashboard' && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="grid grid-cols-12 gap-4 lg:gap-8"
+            >
+              <section className="col-span-12 lg:col-span-8 space-y-6 lg:space-y-8">
+                {/* Credit Cards / Accounts Info */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {accounts.slice(0, 2).map((acc, idx) => (
+                    <BalanceCard key={acc.id} account={acc} />
+                  ))}
+                </div>
+
+                <TransactionList transactions={transactions} />
+              </section>
+
+              <section className="col-span-12 lg:col-span-4 space-y-4 lg:space-y-6">
+                {/* Quick Send */}
+                <div className="sleek-card">
+                  <h3 className="font-bold text-slate-800 mb-4">Quick Send</h3>
+                  <div className="flex gap-3 mb-6 overflow-x-auto pb-2">
+                    {[1, 2, 3].map(i => (
+                      <div key={i} className="flex flex-col items-center gap-2 flex-shrink-0 cursor-pointer group">
+                        <div className="w-12 h-12 rounded-full border border-slate-100 p-0.5 flex items-center justify-center group-hover:border-indigo-500 transition-colors">
+                          <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=P${i}`} className="rounded-full" alt="User" />
+                        </div>
+                        <span className="text-[10px] font-bold text-slate-400 group-hover:text-slate-800">User {i}</span>
+                      </div>
+                    ))}
+                    <div className="flex flex-col items-center gap-2 flex-shrink-0 cursor-pointer group">
+                      <div className="w-12 h-12 rounded-full border border-slate-100 flex items-center justify-center bg-slate-50 group-hover:bg-indigo-50 transition-colors">
+                        <Plus size={20} className="text-slate-400 group-hover:text-indigo-600" />
+                      </div>
+                      <span className="text-[10px] font-bold text-slate-400">New</span>
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-4">
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Enter Amount</label>
+                    <div className="relative">
+                      <span className="absolute left-4 top-1/2 -translate-y-1/2 font-bold text-slate-800">$</span>
+                      <input 
+                        type="text" 
+                        placeholder="0.00" 
+                        className="w-full pl-8 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-600/5 focus:border-indigo-600 transition-all"
+                      />
+                    </div>
+                    <button 
+                      onClick={() => setIsTransferModalOpen(true)}
+                      className="w-full sleek-button-primary"
+                    >
+                      Transfer Money
+                    </button>
+                  </div>
+                </div>
+
+                {/* Upcoming Bill - Dark Version */}
+                {bills.find(b => b.status === 'unpaid') && (
+                  <div className="bg-slate-900 rounded-2xl p-6 text-white overflow-hidden relative shadow-lg shadow-slate-200">
+                    <h3 className="font-bold mb-1">Upcoming Bill</h3>
+                    <p className="text-xs text-slate-400 mb-4">{bills.find(b => b.status === 'unpaid')?.name}</p>
+                    <div className="flex justify-between items-end mb-4">
+                      <div className="text-2xl font-bold">${bills.find(b => b.status === 'unpaid')?.amount}</div>
+                      <div className="text-[11px] text-indigo-400 font-bold uppercase tracking-wider">
+                        Due {bills.find(b => b.status === 'unpaid')?.dueDate}
+                      </div>
+                    </div>
+                    <button className="w-full py-3 bg-white/10 hover:bg-white/20 text-white text-sm font-bold rounded-xl transition-colors border border-white/20">
+                      Pay Bill Now
+                    </button>
+                  </div>
+                )}
+
+                {/* Savings Goal Component */}
+                <div className="sleek-card">
+                  <h3 className="font-bold text-slate-800 mb-3">Savings Goal</h3>
+                  <div className="flex justify-between text-xs mb-2">
+                    <span className="text-slate-500 uppercase font-bold tracking-tight">Europe Trip</span>
+                    <span className="font-bold">72%</span>
+                  </div>
+                  <div className="w-full bg-slate-100 h-2 rounded-full mb-2 overflow-hidden">
+                    <motion.div 
+                      initial={{ width: 0 }}
+                      animate={{ width: '72%' }}
+                      className="bg-emerald-500 h-full rounded-full shadow-sm shadow-emerald-200"
+                    />
+                  </div>
+                  <p className="text-[11px] text-slate-400 font-medium">$3,600.00 of $5,000.00 saved</p>
+                </div>
+              </section>
+            </motion.div>
+          )}
+
+          {activeTab === 'transfers' && (
+             <motion.div
+                initial={{ opacity: 0, scale: 0.98 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="max-w-4xl mx-auto py-8"
+             >
+                <div className="flex justify-between items-end mb-12">
+                   <div>
+                      <h2 className="text-3xl font-bold tracking-tight text-slate-800">Transfers</h2>
+                      <p className="text-slate-500 mt-1">Send money across the world instantly.</p>
+                   </div>
+                   <button 
+                      onClick={() => setIsTransferModalOpen(true)}
+                      className="sleek-button-primary flex items-center gap-2"
+                   >
+                     <Plus size={18} /> New Transfer
+                   </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-12">
+                   <div 
+                      onClick={() => setIsTransferModalOpen(true)}
+                      className="sleek-card hover:border-indigo-200 cursor-pointer transition-all group"
+                    >
+                      <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center mb-6 group-hover:bg-indigo-600 group-hover:text-white transition-all">
+                        <Users size={24} />
+                      </div>
+                      <h3 className="text-xl font-bold mb-2 uppercase tracking-wide">Elite Contacts</h3>
+                      <p className="text-sm text-slate-500 mb-8 leading-relaxed">Instantly send funds to anyone on the NEW AGE OF AMERICA network with zero fees.</p>
+                      <div className="flex items-center gap-2 text-indigo-600 font-bold text-xs uppercase tracking-wider">
+                        Select Contact <ArrowRight size={14} />
+                      </div>
+                   </div>
+                   
+                   <div 
+                      onClick={() => setIsTransferModalOpen(true)}
+                      className="sleek-card hover:border-indigo-200 cursor-pointer transition-all group"
+                    >
+                      <div className="w-12 h-12 bg-slate-100 text-slate-600 rounded-xl flex items-center justify-center mb-6 group-hover:bg-slate-900 group-hover:text-white transition-all">
+                        <Landmark size={24} />
+                      </div>
+                      <h3 className="text-xl font-bold mb-2">External Bank</h3>
+                      <p className="text-sm text-slate-500 mb-8 leading-relaxed">Transfer to other financial institutions worldwide via wire or ACH.</p>
+                      <div className="flex items-center gap-2 text-slate-800 font-bold text-xs uppercase tracking-wider">
+                        Setup Recipient <ArrowRight size={14} />
+                      </div>
+                   </div>
+                </div>
+
+                <TransactionList transactions={transactions.filter(t => t.category === 'Transfer')} />
+             </motion.div>
+          )}
+
+          {activeTab === 'bills' && (
+            <motion.div
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              className="max-w-4xl mx-auto space-y-6 lg:space-y-10"
+            >
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4 lg:mb-10">
+                <h2 className="text-2xl lg:text-3xl font-bold tracking-tight text-slate-800">Bill Pay</h2>
+                <button className="w-full sm:w-auto sleek-button-primary flex items-center justify-center gap-2">
+                  <Plus size={18} /> Add New Bill
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 lg:gap-6">
+                <div className="sleek-card bg-indigo-600 text-white border-none shadow-lg shadow-indigo-100 p-5 lg:p-6">
+                  <p className="text-[10px] lg:text-xs font-bold uppercase tracking-widest text-white/60 mb-2 lg:mb-4">Total Outstanding</p>
+                  <p className="text-3xl lg:text-4xl font-bold tracking-tight mb-1 lg:mb-2 text-white">
+                    ${bills.filter(b => b.status === 'unpaid').reduce((acc, b) => acc + b.amount, 0).toFixed(2)}
+                  </p>
+                  <p className="text-[10px] lg:text-xs text-white/40 font-medium italic">Across {bills.filter(b => b.status === 'unpaid').length} payments</p>
+                </div>
+                <div className="sleek-card p-5 lg:p-6">
+                  <p className="text-[10px] lg:text-xs font-bold uppercase tracking-widest text-slate-400 mb-2 lg:mb-4">Paid this period</p>
+                  <p className="text-3xl lg:text-4xl font-bold tracking-tight text-slate-800 mb-1 lg:mb-2">
+                    ${bills.filter(b => b.status === 'paid').reduce((acc, b) => acc + b.amount, 0).toFixed(2)}
+                  </p>
+                  <div className="flex items-center gap-1.5 text-emerald-600 text-[10px] lg:text-xs font-bold uppercase">
+                    <TrendingUp size={14} /> All clear
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-3 lg:space-y-4">
+                {bills.map(bill => (
+                  <div 
+                    key={bill.id} 
+                    className={`sleek-card p-4 lg:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all ${
+                      bill.status === 'paid' ? 'opacity-50' : 'hover:scale-[1.01] hover:shadow-md'
+                    }`}
+                  >
+                    <div className="flex items-center gap-4 lg:gap-6">
+                      <div className={`w-10 h-10 lg:w-12 lg:h-12 rounded-xl flex items-center justify-center flex-shrink-0 ${
+                        bill.status === 'paid' ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-600'
+                      }`}>
+                        <ReceiptText size={20} />
+                      </div>
+                      <div>
+                        <h4 className="text-base lg:text-lg font-bold text-slate-800">{bill.name}</h4>
+                        <p className="text-[10px] lg:text-xs font-bold text-slate-400 uppercase tracking-wider">
+                          Due {bill.dueDate} • {bill.category}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between sm:justify-end gap-4 lg:gap-8 border-t sm:border-none pt-3 sm:pt-0">
+                       <p className="text-lg font-bold text-slate-800">${bill.amount}</p>
+                       {bill.status === 'unpaid' ? (
+                         <button className="sleek-button-primary py-2 px-4 lg:py-2.5 lg:px-6 text-[10px] lg:text-xs uppercase font-bold tracking-widest">Pay Bill</button>
+                       ) : (
+                         <span className="px-3 py-1 bg-emerald-50 text-emerald-600 text-[10px] font-bold uppercase tracking-widest rounded-md">
+                           Paid
+                         </span>
+                       )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          )}
+
+          {activeTab === 'analytics' && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="space-y-12 max-w-6xl mx-auto"
+            >
+              <div className="mb-10">
+                <h2 className="text-3xl font-bold tracking-tight text-slate-800">Financial Insights</h2>
+                <p className="text-slate-500 mt-1">Smart tracking powered by AI for better financial decisions.</p>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <div className="sleek-card h-[500px] flex flex-col">
+                  <div className="flex justify-between items-center mb-10">
+                     <h3 className="text-xl font-bold text-slate-800">Spending Trends</h3>
+                     <select className="bg-slate-50 border-none rounded-lg text-xs font-bold text-slate-500 py-1.5 focus:ring-0">
+                        <option>Last 30 Days</option>
+                        <option>Last 6 Months</option>
+                     </select>
+                  </div>
+                  <div className="flex-1 w-full">
+                    <SpendingChart />
+                  </div>
+                </div>
+                
+                <div className="sleek-card h-[500px] flex flex-col">
+                  <div className="flex justify-between items-center mb-10">
+                    <h3 className="text-xl font-bold text-slate-800">Asset Growth</h3>
+                     <div className="flex items-center gap-1.5 text-emerald-600 text-xs font-bold uppercase">
+                        <TrendingUp size={14} /> +4.2% Growth
+                      </div>
+                  </div>
+                  <div className="flex-1 w-full">
+                    <NetWorthChart />
+                  </div>
+                </div>
+              </div>
+
+              {/* Data Summary Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                 {[
+                   { label: 'Highest Spend', value: '$1,240.00', sub: 'Housing & Rent', color: 'indigo' },
+                   { label: 'Avg Monthly Save', value: '$840.00', sub: 'Healthy Growth', color: 'emerald' },
+                   { label: 'Investment ROI', value: '+12.4%', sub: 'Last Quarter', color: 'indigo' }
+                 ].map((item, i) => (
+                   <div key={i} className="sleek-card">
+                      <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-4">{item.label}</p>
+                      <p className="text-3xl font-bold text-slate-800 mb-1">{item.value}</p>
+                      <p className={`text-xs font-bold text-${item.color}-600 tracking-tight`}>{item.sub}</p>
+                   </div>
+                 ))}
+              </div>
+            </motion.div>
+          )}
+
+          {activeTab === 'settings' && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="max-w-3xl mx-auto"
+            >
+               <h2 className="text-3xl font-bold mb-10 tracking-tight text-slate-800">Preferences</h2>
+               <div className="space-y-8">
+                  <div className="sleek-card">
+                     <h3 className="font-bold text-slate-800 border-b border-slate-100 pb-4 mb-8">Personal Details</h3>
+                     <div className="flex items-center gap-8 mb-10">
+                        <div className="relative group shrink-0">
+                          <div className="w-24 h-24 rounded-2xl bg-indigo-50 border-4 border-slate-100 flex items-center justify-center font-bold text-2xl text-indigo-600">
+                            {user.displayName?.charAt(0) || user.email?.charAt(0).toUpperCase()}
+                          </div>
+                          <div className="absolute inset-0 bg-black/40 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer">
+                            <span className="text-white text-[10px] font-bold uppercase tracking-widest">Update</span>
+                          </div>
+                        </div>
+                        <div>
+                           <p className="text-lg font-bold text-slate-800 capitalize">{user.displayName || 'Member'}</p>
+                           <p className="text-sm text-slate-500">{isAdmin ? 'Executive Administrator' : 'Premium Member since 2024'}</p>
+                           <button className="text-indigo-600 text-xs font-bold uppercase tracking-widest mt-3 hover:underline">Edit Membership</button>
+                        </div>
+                     </div>
+                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                        <div className="space-y-2">
+                           <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Display Name</label>
+                           <input type="text" value={user.displayName || ''} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl font-semibold" readOnly />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Email Address</label>
+                          <input type="email" value={user.email || ''} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl font-semibold" readOnly />
+                        </div>
+                     </div>
+                     <button className="sleek-button-primary mt-10 w-full sm:w-auto">Save Changes</button>
+                  </div>
+
+                  <div className="sleek-card">
+                     <h3 className="font-bold text-slate-800 border-b border-slate-100 pb-4 mb-6">Privacy & Security</h3>
+                     <div className="divide-y divide-slate-100">
+                        <div className="py-6">
+                           <div className="flex items-center justify-between mb-4">
+                              <div>
+                                 <p className="font-bold text-slate-800">Master Password</p>
+                                 <p className="text-xs text-slate-500">Update your account credentials for increased security.</p>
+                              </div>
+                              <ShieldAlert size={20} className="text-amber-500" />
+                           </div>
+                           <button 
+                             onClick={() => {
+                                alert('A secure verification link has been sent to your registered institutional primary email address.');
+                             }}
+                             className="text-xs font-bold text-indigo-600 bg-indigo-50 px-4 py-2 rounded-lg hover:bg-indigo-100 transition-colors uppercase tracking-widest"
+                           >
+                             Reset via Email
+                           </button>
+                        </div>
+                        <div className="py-6 flex items-center justify-between">
+                           <div>
+                              <p className="font-bold text-slate-800">Two-Factor Authentication</p>
+                              <p className="text-xs text-slate-500">Add an extra layer of security to your account.</p>
+                           </div>
+                           <div className="w-12 h-6 bg-indigo-600 rounded-full relative cursor-pointer shadow-inner">
+                              <div className="absolute right-1 top-1 w-4 h-4 bg-white rounded-full shadow-md" />
+                           </div>
+                        </div>
+                     </div>
+                  </div>
+               </div>
+            </motion.div>
+          )}
+        </div>
+      </main>
+
+      {/* Mobile Bottom Navigation */}
+      <div className="lg:hidden fixed bottom-0 left-0 right-0 h-16 bg-white border-t border-slate-200 px-2 flex items-center justify-around z-50">
+        {[
+          { id: 'dashboard', icon: LayoutDashboard, label: 'Home' },
+          { id: 'transfers', icon: ArrowLeftRight, label: 'Pay' },
+          { id: 'bills', icon: ReceiptText, label: 'Bills' },
+          { id: 'admin', icon: ShieldAlert, label: 'Admin' },
+          { id: 'settings', icon: Settings, label: 'You' },
+        ].map((item) => (
+          <button
+            key={item.id}
+            onClick={() => setActiveTab(item.id)}
+            className={`flex flex-col items-center gap-1 p-2 min-w-[64px] transition-colors ${
+              activeTab === item.id ? 'text-indigo-600' : 'text-slate-400'
+            }`}
+          >
+            <item.icon size={20} strokeWidth={activeTab === item.id ? 2.5 : 2} />
+            <span className="text-[10px] font-bold uppercase tracking-wider">{item.label}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* Splash Screen */}
+      <AnimatePresence>
+        {showSplash && <SplashScreen />}
+      </AnimatePresence>
+
+      {/* Floating AI */}
+      <div className="hidden lg:block">
+        <ExecutiveAdvisor />
+      </div>
+
+      {/* Modals */}
+      <AnimatePresence>
+        {isTransferModalOpen && (
+          <TransferModal 
+            accounts={accounts} 
+            onClose={() => setIsTransferModalOpen(false)} 
+            onSuccess={fetchData}
+          />
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
