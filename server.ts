@@ -1,5 +1,6 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
@@ -55,6 +56,23 @@ interface AdminLog {
   time: string;
 }
 
+interface SupportMessage {
+  id: string;
+  userId: string;
+  userName: string;
+  subject: string;
+  text: string;
+  date: string;
+  replies: Array<{
+    id: string;
+    sender: 'admin' | 'user';
+    senderName: string;
+    text: string;
+    date: string;
+  }>;
+  status: 'open' | 'resolved';
+}
+
 interface Bill {
   id: string;
   name: string;
@@ -63,6 +81,16 @@ interface Bill {
   status: 'paid' | 'unpaid';
   category: string;
   accountId?: string;
+}
+
+interface VaultItem {
+  id: string;
+  userId: string;
+  name: string;
+  size: string;
+  type: string;
+  uploadDate: string;
+  expiryDate: string;
 }
 
 let genAIClient: GoogleGenAI | null = null;
@@ -86,7 +114,9 @@ function getGenAI() {
 
 // Mock Database State
 let users: User[] = [
-  { uid: 'user_1', email: 'pastorjohn046@gmail.com', displayName: 'John Pastor', role: 'admin' }
+  { uid: 'user_1', email: 'pastorjohn046@gmail.com', displayName: 'John Pastor', role: 'admin' },
+  { uid: 'user_2', email: 'sarah.jenkins@newage.com', displayName: 'Sarah Jenkins', role: 'user' },
+  { uid: 'user_3', email: 'david.smith@newage.com', displayName: 'David Smith', role: 'user' }
 ];
 
 let accounts: Account[] = [
@@ -97,6 +127,9 @@ let accounts: Account[] = [
 ];
 
 let transactions: Transaction[] = [
+  { id: 't_pending_1', accountId: '1', date: new Date(Date.now() - 45 * 60000).toISOString(), amount: 6500.00, description: 'Digital Asset Liquid Deposit (BTC-920)', category: 'Deposit', type: 'credit', status: 'pending' },
+  { id: 't_pending_2', accountId: '1', date: new Date(Date.now() - 120 * 60000).toISOString(), amount: -4500.00, description: 'Wire Transfer to Sarah Jenkins', category: 'Transfer', type: 'debit', status: 'pending', toAccountId: '3' },
+  { id: 't_pending_3', accountId: '3', date: new Date(Date.now() - 120 * 60000).toISOString(), amount: 4500.00, description: 'Incoming Transfer Request from John Pastor (Checking)', category: 'Transfer', type: 'credit', status: 'pending' },
   { id: 't1', accountId: '1', date: new Date().toISOString(), amount: -12.50, description: 'Starbucks Coffee', category: 'Food & Drink', type: 'debit', status: 'completed' },
   { id: 't2', accountId: '1', date: new Date(Date.now() - 86400000).toISOString(), amount: -54.20, description: 'Shell Gasoline', category: 'Transportation', type: 'debit', status: 'completed' },
   { id: 't3', accountId: '1', date: new Date(Date.now() - 172800000).toISOString(), amount: 2500.00, description: 'Salary Deposit', category: 'Income', type: 'credit', status: 'completed' },
@@ -109,16 +142,123 @@ let bills: Bill[] = [
   { id: 'b3', name: 'Premium Insurance', dueDate: '2026-05-20', amount: 250.00, status: 'paid', category: 'Insurance' }
 ];
 
-let adminLogs: AdminLog[] = [
+let adminLogs: AdminLog[] = process.env.NODE_ENV === "production" ? [] : [
   { id: '1', msg: 'Core System Initialized', time: new Date().toLocaleTimeString() },
   { id: '2', msg: 'Executive Channel Security active', time: new Date().toLocaleTimeString() }
 ];
 
+let vaultItems: VaultItem[] = [
+  {
+    id: 'v1',
+    userId: 'user_1',
+    name: 'Executive_ID_Verification.pdf',
+    size: '1.4 MB',
+    type: 'application/pdf',
+    uploadDate: new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString(),
+    expiryDate: new Date(Date.now() + 28 * 24 * 3600 * 1000).toISOString()
+  },
+  {
+    id: 'v2',
+    userId: 'user_1',
+    name: 'Offshore_Tax_Declaration_2026.pdf',
+    size: '3.1 MB',
+    type: 'application/pdf',
+    uploadDate: new Date(Date.now() - 5 * 24 * 3600 * 1000).toISOString(),
+    expiryDate: new Date(Date.now() + 25 * 24 * 3600 * 1000).toISOString()
+  }
+];
+
+let supportMessages: SupportMessage[] = [
+  {
+    id: 'msg_1',
+    userId: 'user_1',
+    userName: 'John Pastor',
+    subject: 'Credit Line Increment Request',
+    text: 'Hello, I have deposited significant digital assets recently. I would like to request an upgrade to my Credit Overdraft limit to $250,000 for upcoming trade ventures.',
+    date: new Date(Date.now() - 3 * 3600000).toISOString(),
+    status: 'open',
+    replies: [
+      {
+        id: 'reply_1',
+        sender: 'admin',
+        senderName: 'System Specialist',
+        text: 'Welcome John. Our automated risk parameters are currently evaluating your collateral reserves. Please keep your account premium status active.',
+        date: new Date(Date.now() - 2.5 * 3600000).toISOString()
+      }
+    ]
+  },
+  {
+    id: 'msg_2',
+    userId: 'user_2',
+    userName: 'Sarah Jenkins',
+    subject: 'International Asset Transfer Hold',
+    text: 'My offshore transfer of $45,000 has been marked as pending verification for 4 hours. Can an admin force clear this transfer?',
+    date: new Date(Date.now() - 5 * 3600000).toISOString(),
+    status: 'open',
+    replies: []
+  }
+];
+
+const DB_FILE_PATH = path.join(process.cwd(), "db_persisted.json");
+
+function saveDb() {
+  try {
+    const data = {
+      users,
+      accounts,
+      transactions,
+      bills,
+      adminLogs,
+      vaultItems,
+      supportMessages
+    };
+    fs.writeFileSync(DB_FILE_PATH, JSON.stringify(data, null, 2), "utf8");
+  } catch (err) {
+    console.error("Error saving database to persistence store:", err);
+  }
+}
+
+function loadDb() {
+  try {
+    if (fs.existsSync(DB_FILE_PATH)) {
+      const content = fs.readFileSync(DB_FILE_PATH, "utf8");
+      if (content.trim()) {
+        const data = JSON.parse(content);
+        if (data.users) users = data.users;
+        if (data.accounts) accounts = data.accounts;
+        if (data.transactions) transactions = data.transactions;
+        if (data.bills) bills = data.bills;
+        if (data.adminLogs) adminLogs = data.adminLogs;
+        if (data.vaultItems) vaultItems = data.vaultItems;
+        if (data.supportMessages) supportMessages = data.supportMessages;
+        console.log("Database state restored successfully from file storage.");
+      }
+    } else {
+      saveDb();
+    }
+  } catch (err) {
+    console.error("Error loading database from file: falling back to memory defaults.", err);
+  }
+}
+
 async function startServer() {
+  loadDb();
   const app = express();
   const PORT = 3000;
 
   app.use(express.json());
+
+  // Auto-save DB on successful mutations (non-GET requests)
+  app.use((req, res, next) => {
+    if (req.method !== 'GET') {
+      res.on('finish', () => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          saveDb();
+        }
+      });
+    }
+    next();
+  });
 
   // Request logger
   app.use((req, res, next) => {
@@ -226,6 +366,7 @@ async function startServer() {
 
   // API Routes
   app.get("/api/accounts", (req, res) => res.json(accounts));
+  app.get("/api/admin/users", (req, res) => res.json(users));
   
   app.get("/api/transactions", (req, res) => {
     const { accountId } = req.query;
@@ -241,7 +382,7 @@ async function startServer() {
     const totalDeposits = accounts.reduce((acc, a) => acc + a.balance, 0);
     const totalTransactions = transactions.length;
     const pendingBills = bills.filter(b => b.status === 'unpaid').length;
-    const pendingTransactions = transactions.filter(t => t.status === 'pending').length;
+    const pendingTransactions = transactions.filter(t => t.status === 'pending' && !t.description.startsWith('Incoming Transfer Request')).length;
     const totalCredit = accounts.reduce((acc, a) => acc + (a.creditLimit || 0), 0);
     
     res.json({
@@ -273,7 +414,7 @@ async function startServer() {
 
   // Admin: Add Transaction
   app.post("/api/admin/transactions", (req, res) => {
-    const { accountId, description, amount, category, status } = req.body;
+    const { accountId, description, amount, category, status, date } = req.body;
     const account = accounts.find(a => a.id === accountId);
     if (!account) return res.status(404).json({ error: "Account not found" });
 
@@ -285,19 +426,27 @@ async function startServer() {
       return res.status(403).json({ error: "Deposits are restricted for this account" });
     }
 
+    const txStatus = (status as any) || 'completed';
+    const txDate = date ? new Date(date).toISOString() : new Date().toISOString();
+
     const newTransaction: Transaction = {
       id: Math.random().toString(36).substr(2, 9),
       accountId,
       description,
       amount: Number(amount),
-      date: new Date().toISOString(),
+      date: txDate,
       category: category || 'Other',
       type: Number(amount) >= 0 ? 'credit' : 'debit',
-      status: (status as any) || 'completed'
+      status: txStatus
     };
 
     transactions.unshift(newTransaction);
-    account.balance += Number(amount);
+    
+    // Adjust balance immediately if completed OR if it is a pending debit (held funds)
+    if (txStatus === 'completed' || (txStatus === 'pending' && Number(amount) < 0)) {
+      account.balance += Number(amount);
+    }
+    
     res.status(201).json(newTransaction);
   });
 
@@ -333,6 +482,15 @@ async function startServer() {
     // If it was a debit, balance was already decremented at initiation to "hold" funds.
     if (tx.type === 'credit') {
       account.balance += tx.amount;
+    }
+
+    // Update bill status if this was a bill payment
+    if (tx.description && tx.description.startsWith("Pending Bill Pay: ")) {
+      const billName = tx.description.replace("Pending Bill Pay: ", "");
+      const bill = bills.find(b => b.name === billName && b.status === "pending" as any);
+      if (bill) {
+        bill.status = 'paid';
+      }
     }
 
     // Handle the other side of a persistent internal transfer if exists
@@ -373,6 +531,15 @@ async function startServer() {
     // If it was a debit, we need to refund the held balance
     if (tx.type === 'debit') {
       account.balance += Math.abs(tx.amount);
+    }
+
+    // Revert bill status to unpaid if this was a bill payment
+    if (tx.description && tx.description.startsWith("Pending Bill Pay: ")) {
+      const billName = tx.description.replace("Pending Bill Pay: ", "");
+      const bill = bills.find(b => b.name === billName && (b.status === "pending" as any || b.status === "paid"));
+      if (bill) {
+        bill.status = 'unpaid';
+      }
     }
 
     // Handle pair
@@ -509,6 +676,91 @@ async function startServer() {
     }
   });
 
+  // Support Messaging Endpoints
+  // 1. Get all messages (Admin view)
+  app.get("/api/admin/messages", (req, res) => {
+    res.json(supportMessages);
+  });
+
+  // 2. Get messages for a user
+  app.get("/api/users/:uid/messages", (req, res) => {
+    const { uid } = req.params;
+    res.json(supportMessages.filter(m => m.userId === uid));
+  });
+
+  // 3. Create a message from user
+  app.post("/api/messages", (req, res) => {
+    const { userId, userName, subject, text } = req.body;
+    if (!userId || !text) {
+      return res.status(400).json({ error: "Missing required message parameters" });
+    }
+    const newMessage: SupportMessage = {
+      id: `msg_${Date.now()}`,
+      userId,
+      userName: userName || "Valued Client",
+      subject: subject || "Secure Correspondence",
+      text,
+      date: new Date().toISOString(),
+      replies: [],
+      status: 'open'
+    };
+    supportMessages.unshift(newMessage);
+
+    adminLogs.unshift({
+      id: Math.random().toString(36).substr(2, 9),
+      msg: `New SC Support Message from ${newMessage.userName}: ${newMessage.subject}`,
+      time: new Date().toLocaleTimeString()
+    });
+
+    res.status(201).json(newMessage);
+  });
+
+  // 4. Add reply to message
+  app.post("/api/messages/:id/reply", (req, res) => {
+    const { id } = req.params;
+    const { sender, senderName, text } = req.body;
+    const msg = supportMessages.find(m => m.id === id);
+    if (!msg) {
+      return res.status(404).json({ error: "Message thread not found" });
+    }
+    if (!text) {
+      return res.status(400).json({ error: "Reply text is required" });
+    }
+
+    const newReply = {
+      id: `rep_${Date.now()}`,
+      sender: sender || 'user',
+      senderName: senderName || (sender === 'admin' ? 'System Admin' : 'Client'),
+      text,
+      date: new Date().toISOString()
+    };
+    msg.replies.push(newReply);
+
+    // Auto update status on user reply
+    if (sender === 'user') {
+      msg.status = 'open';
+    }
+
+    res.status(201).json(newReply);
+  });
+
+  // 5. Toggle Resolve/Open state of a message
+  app.post("/api/messages/:id/toggle-resolve", (req, res) => {
+    const { id } = req.params;
+    const msg = supportMessages.find(m => m.id === id);
+    if (!msg) return res.status(404).json({ error: "Message thread not found" });
+
+    msg.status = msg.status === 'open' ? 'resolved' : 'open';
+    
+    adminLogs.unshift({
+      id: Math.random().toString(36).substr(2, 9),
+      msg: `SC Message ${msg.id} status toggled to ${msg.status}`,
+      time: new Date().toLocaleTimeString()
+    });
+
+    res.json({ success: true, status: msg.status });
+  });
+
   app.post("/api/ai/advisor", async (req, res) => {
     try {
       const { prompt } = req.body;
@@ -538,6 +790,57 @@ async function startServer() {
       console.error("AI Error:", error);
       res.status(500).json({ error: "AI Assistant unavailable" });
     }
+  });
+
+  // 30-Day Storage Vault API
+  app.get("/api/vault", (req, res) => {
+    const { userId } = req.query;
+    if (userId) {
+      return res.json(vaultItems.filter(v => v.userId === userId));
+    }
+    res.json(vaultItems);
+  });
+
+  app.post("/api/vault", (req, res) => {
+    const { userId, name, size, type } = req.body;
+    if (!userId || !name) {
+      return res.status(400).json({ error: "Missing required vault parameters" });
+    }
+    const newItem: VaultItem = {
+      id: `v_${Date.now()}`,
+      userId,
+      name,
+      size: size || "1.0 MB",
+      type: type || "application/pdf",
+      uploadDate: new Date().toISOString(),
+      expiryDate: new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString() // Exact 30 days storage
+    };
+    vaultItems.unshift(newItem);
+
+    adminLogs.unshift({
+      id: Math.random().toString(36).substr(2, 9),
+      msg: `New document secured in 30-Day Storage Vault: ${name} (${size})`,
+      time: new Date().toLocaleTimeString()
+    });
+
+    res.status(201).json(newItem);
+  });
+
+  app.delete("/api/vault/:id", (req, res) => {
+    const { id } = req.params;
+    const index = vaultItems.findIndex(v => v.id === id);
+    if (index === -1) {
+      return res.status(404).json({ error: "Vault item not found" });
+    }
+    const deleted = vaultItems.splice(index, 1)[0];
+
+    adminLogs.unshift({
+      id: Math.random().toString(36).substr(2, 9),
+      msg: `Document purged/withdrawn from 30-Day Vault: ${deleted.name}`,
+      time: new Date().toLocaleTimeString()
+    });
+
+    res.json({ success: true, deleted });
   });
 
   // Vite middleware for development

@@ -32,6 +32,23 @@ export interface Bill {
   category: string;
 }
 
+export interface SupportMessage {
+  id: string;
+  userId: string;
+  userName: string;
+  subject: string;
+  text: string;
+  date: string;
+  replies: Array<{
+    id: string;
+    sender: 'admin' | 'user';
+    senderName: string;
+    text: string;
+    date: string;
+  }>;
+  status: 'open' | 'resolved';
+}
+
 export interface User {
   uid: string;
   displayName: string;
@@ -46,4 +63,14 @@ export interface User {
     bitcoin?: string;
     bankInfo?: string;
   };
+}
+
+export interface VaultItem {
+  id: string;
+  userId: string;
+  name: string;
+  size: string;
+  type: string;
+  uploadDate: string;
+  expiryDate: string;
 }

@@ -1,5 +1,5 @@
 
-import { Account, Transaction, Bill } from '../types';
+import { Account, Transaction, Bill, VaultItem } from '../types';
 
 const API_BASE = '/api';
 
@@ -41,5 +41,24 @@ export const api = {
     });
     const data = await res.json();
     return data.text;
+  },
+  getVaultItems: async (userId?: string): Promise<VaultItem[]> => {
+    const url = userId ? `${API_BASE}/vault?userId=${userId}` : `${API_BASE}/vault`;
+    const res = await fetch(url);
+    return res.json();
+  },
+  uploadToVault: async (data: { userId: string; name: string; size?: string; type?: string }): Promise<VaultItem> => {
+    const res = await fetch(`${API_BASE}/vault`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    return res.json();
+  },
+  deleteFromVault: async (id: string): Promise<{ success: boolean }> => {
+    const res = await fetch(`${API_BASE}/vault/${id}`, {
+      method: 'DELETE',
+    });
+    return res.json();
   }
 };

@@ -9,9 +9,15 @@ import {
   RefreshCw,
   Wallet,
   ReceiptText,
-  CreditCard
+  CreditCard,
+  Mail,
+  MessageSquare,
+  ArrowLeft,
+  Send,
+  Search,
+  ArrowUpDown
 } from 'lucide-react';
-import { Account } from '../../types';
+import { Account, SupportMessage, User } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
 
 interface AdminMetrics {
@@ -29,7 +35,12 @@ export const AdminPanel = () => {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [transactions, setTransactions] = useState<{ id: string, accountId: string, amount: number, description: string, status: string, type: string, date: string }[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [activeView, setActiveView] = useState<'overview' | 'accounts' | 'transactions' | 'bills' | 'approvals'>('overview');
+  const [activeView, setActiveView] = useState<'overview' | 'accounts' | 'transactions' | 'bills' | 'approvals' | 'messages'>('overview');
+
+  const [usersList, setUsersList] = useState<User[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [userSortField, setUserSortField] = useState<'name' | 'email' | 'uid' | 'balance' | 'role'>('name');
+  const [userSortOrder, setUserSortOrder] = useState<'asc' | 'desc'>('asc');
 
   // Form States
   const [selectedAccId, setSelectedAccId] = useState('');
@@ -112,7 +123,73 @@ export const AdminPanel = () => {
   const [txDesc, setTxDesc] = useState('');
   const [txAmount, setTxAmount] = useState('');
   const [txCat, setTxCat] = useState('Other');
-  
+  const [txStatus, setTxStatus] = useState<'completed' | 'pending' | 'rejected'>('completed');
+  const [txDate, setTxDate] = useState('');
+
+  // Support Messaging Panel States & Methods
+  const [messages, setMessages] = useState<SupportMessage[]>([]);
+  const [selectedMsg, setSelectedMsg] = useState<SupportMessage | null>(null);
+  const [replyText, setReplyText] = useState('');
+  const [sendingReply, setSendingReply] = useState(false);
+
+  const selectedMsgRef = React.useRef<SupportMessage | null>(null);
+  useEffect(() => {
+    selectedMsgRef.current = selectedMsg;
+  }, [selectedMsg]);
+
+  const fetchMessages = async () => {
+    try {
+      const res = await fetch('/api/admin/messages');
+      const data = await res.json();
+      setMessages(data);
+      if (selectedMsgRef.current) {
+        const found = data.find((m: any) => m.id === selectedMsgRef.current?.id);
+        if (found) setSelectedMsg(found);
+      }
+    } catch (err) {
+      console.error('Error syncing support communications:', err);
+    }
+  };
+
+  const handleSendReply = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedMsg || !replyText.trim()) return;
+    setSendingReply(true);
+    try {
+      const res = await fetch(`/api/messages/${selectedMsg.id}/reply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sender: 'admin',
+          senderName: 'System Specialist',
+          text: replyText
+        })
+      });
+      if (!res.ok) throw new Error('Failed to post reply');
+      setReplyText('');
+      showStatus('Secured response transmitted');
+      await fetchMessages();
+    } catch (err: any) {
+      showStatus(err.message, 'error');
+    } finally {
+      setSendingReply(false);
+    }
+  };
+
+  const handleToggleResolve = async (msgId: string) => {
+    try {
+      const res = await fetch(`/api/messages/${msgId}/toggle-resolve`, {
+        method: 'POST'
+      });
+      if (!res.ok) throw new Error('Action failed');
+      const data = await res.json();
+      showStatus(`Ticket Status marked as: ${data.status.toUpperCase()}`);
+      await fetchMessages();
+    } catch (err) {
+       showStatus('Failed to toggle status', 'error');
+    }
+  };
+
   const [billName, setBillName] = useState('');
   const [billAmount, setBillAmount] = useState('');
   const [billDue, setBillDue] = useState('');
@@ -128,10 +205,11 @@ export const AdminPanel = () => {
   const fetchAll = async () => {
     setIsLoading(true);
     try {
-      const [mRes, aRes, tRes] = await Promise.all([
+      const [mRes, aRes, tRes, uRes] = await Promise.all([
         fetch('/api/admin/metrics'),
         fetch('/api/accounts'),
-        fetch('/api/transactions')
+        fetch('/api/transactions'),
+        fetch('/api/admin/users')
       ]);
       const metricsData = await mRes.json();
       setMetrics(metricsData);
@@ -139,6 +217,8 @@ export const AdminPanel = () => {
       setAccounts(accs);
       const txs = await tRes.json();
       setTransactions(txs);
+      const uData = await uRes.json();
+      setUsersList(uData);
       
       if (accs.length > 0) {
         const currentSelectedId = selectedAccId || accs[0].id;
@@ -161,6 +241,8 @@ export const AdminPanel = () => {
           setBi(dData.bankInfo || '');
         }
       }
+      // Also fetch support messages in parallel
+      await fetchMessages();
     } catch (err) {
       console.error(err);
       showStatus('Failed to sync system data', 'error');
@@ -168,6 +250,17 @@ export const AdminPanel = () => {
       setIsLoading(false);
     }
   };
+
+  useEffect(() => {
+    let interval: NodeJS.Timeout | null = null;
+    if (activeView === 'messages') {
+      fetchMessages();
+      interval = setInterval(fetchMessages, 3000); // Polling messages every 3s
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [activeView]);
 
   useEffect(() => {
     fetchAll();
@@ -219,17 +312,21 @@ export const AdminPanel = () => {
           accountId: selectedAccId,
           description: txDesc,
           amount: txAmount,
-          category: txCat
+          category: txCat,
+          status: txStatus,
+          date: txDate || undefined
         })
       });
       if (!res.ok) {
         const error = await res.json();
         throw new Error(error.error || 'Transaction failed');
       }
-      addLog(`Injected ${txAmount} to ${selectedAccId}`);
+      addLog(`Injected ${txAmount} (Status: ${txStatus}) to ${selectedAccId}`);
       showStatus('Transaction recorded and balance settled');
       setTxDesc('');
       setTxAmount('');
+      setTxStatus('completed');
+      setTxDate('');
       fetchAll();
     } catch (err: any) {
       showStatus(err.message, 'error');
@@ -271,6 +368,50 @@ export const AdminPanel = () => {
     }
   };
 
+  const filteredUsers = React.useMemo(() => {
+    let result = usersList.filter(u => {
+      const q = searchQuery.toLowerCase();
+      const matchName = u.displayName?.toLowerCase().includes(q);
+      const matchEmail = u.email?.toLowerCase().includes(q);
+      const matchUid = u.uid?.toLowerCase().includes(q);
+      return matchName || matchEmail || matchUid;
+    });
+
+    result.sort((a, b) => {
+      let orderMult = userSortOrder === 'asc' ? 1 : -1;
+      
+      if (userSortField === 'name') {
+        return (a.displayName || '').localeCompare(b.displayName || '') * orderMult;
+      }
+      if (userSortField === 'email') {
+        return (a.email || '').localeCompare(b.email || '') * orderMult;
+      }
+      if (userSortField === 'uid') {
+        return (a.uid || '').localeCompare(b.uid || '') * orderMult;
+      }
+      if (userSortField === 'role') {
+        return (a.role || '').localeCompare(b.role || '') * orderMult;
+      }
+      if (userSortField === 'balance') {
+        const balA = accounts.filter(ac => ac.userId === a.uid).reduce((sum, ac) => sum + ac.balance, 0);
+        const balB = accounts.filter(ac => ac.userId === b.uid).reduce((sum, ac) => sum + ac.balance, 0);
+        return (balA - balB) * orderMult;
+      }
+      return 0;
+    });
+
+    return result;
+  }, [usersList, searchQuery, userSortField, userSortOrder, accounts]);
+
+  const handleUserSort = (field: 'name' | 'email' | 'uid' | 'balance' | 'role') => {
+    if (userSortField === field) {
+      setUserSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setUserSortField(field);
+      setUserSortOrder('asc');
+    }
+  };
+
   return (
     <div className="space-y-8 pb-20">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-6">
@@ -307,6 +448,7 @@ export const AdminPanel = () => {
           { id: 'transactions', label: 'Insert Activity', icon: Database },
           { id: 'bills', label: 'Manage Bills', icon: ReceiptText },
           { id: 'approvals', label: 'Asset Approvals', icon: ShieldCheck },
+          { id: 'messages', label: 'SC Messaging', icon: Mail },
         ].map(tab => (
           <button
             key={tab.id}
@@ -409,148 +551,277 @@ export const AdminPanel = () => {
       )}
 
       {activeView === 'accounts' && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          <div className="sleek-card">
-            <h3 className="font-bold text-slate-800 mb-6">Modify Entity Profile</h3>
-            <div className="space-y-4">
+        <div className="space-y-6">
+          {/* User Directory & Database Search */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
               <div>
-                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Display Name</label>
-                <input 
+                <h3 className="font-extrabold text-slate-900 text-base flex items-center gap-2">
+                  <Users size={18} className="text-slate-700" /> User Security & Account Directory
+                </h3>
+                <p className="text-xs text-slate-400 font-medium font-semibold">Search, filter, and audit client credentials alongside asset ledgers.</p>
+              </div>
+              <div className="relative w-full sm:w-72">
+                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
                   type="text"
-                  placeholder="Full Name"
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800"
+                  placeholder="Search name, email, or UID..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-4 py-2.5 text-xs font-semibold text-slate-805 outline-none focus:bg-white focus:ring-2 focus:ring-slate-950/5 focus:border-slate-800 transition-all font-sans placeholder:text-slate-450"
                 />
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Balance Override</label>
-                  <input 
-                    type="number"
-                    value={newBalance}
-                    onChange={(e) => setNewBalance(e.target.value)}
-                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800"
-                  />
-                </div>
-                <div>
-                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Credit limit</label>
-                  <input 
-                    type="number"
-                    value={newCredit}
-                    onChange={(e) => setNewCredit(e.target.value)}
-                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800"
-                  />
-                </div>
-              </div>
-              <button onClick={handleUpdateAccount} className="w-full sleek-button-primary">
-                Save Profile Changes
-              </button>
+            </div>
+
+            {/* Sortable User Table */}
+            <div className="overflow-x-auto border border-slate-150 rounded-xl">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-150">
+                    {[
+                      { key: 'name', label: 'Client / Name' },
+                      { key: 'email', label: 'Secure Email' },
+                      { key: 'uid', label: 'User UID' },
+                      { key: 'role', label: 'Security Level' },
+                      { key: 'balance', label: 'Aggregated Holdings' },
+                    ].map((col) => (
+                      <th
+                        key={col.key}
+                        onClick={() => handleUserSort(col.key as any)}
+                        className="p-3 text-[10px] font-black uppercase text-slate-500 tracking-wider cursor-pointer select-none hover:bg-slate-100/80 hover:text-slate-800 transition-colors"
+                      >
+                        <div className="flex items-center gap-1 font-bold">
+                          {col.label}
+                          <ArrowUpDown size={11} className={`text-slate-400 ${userSortField === col.key ? 'text-slate-900' : ''}`} />
+                        </div>
+                      </th>
+                    ))}
+                    <th className="p-3 text-[10px] font-black uppercase text-slate-500 tracking-wider text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-xs font-semibold">
+                  {filteredUsers.map((u) => {
+                    const userAccounts = accounts.filter((a) => a.userId === u.uid);
+                    const totalHoldings = userAccounts.reduce((sum, a) => sum + a.balance, 0);
+                    const isSelectedUser = userAccounts.some(a => a.id === selectedAccId);
+                    
+                    return (
+                      <tr 
+                        key={u.uid} 
+                        className={`hover:bg-slate-50/60 transition ${isSelectedUser ? 'bg-indigo-50/10' : ''}`}
+                      >
+                        <td className="p-3">
+                          <div className="flex items-center gap-2">
+                            <div className="w-7 h-7 bg-slate-150 text-slate-700 font-bold border border-slate-200 rounded-full flex items-center justify-center text-[11px] uppercase shrink-0">
+                              {u.displayName?.substring(0, 1) || u.email?.substring(0, 1) || '?'}
+                            </div>
+                            <span className="font-extrabold text-slate-800 select-all">{u.displayName}</span>
+                          </div>
+                        </td>
+                        <td className="p-3 font-mono text-slate-650 text-[11px] select-all">{u.email}</td>
+                        <td className="p-3 font-mono text-slate-400 text-[10px] select-all">{u.uid}</td>
+                        <td className="p-3">
+                          <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider ${
+                            u.role === 'admin' 
+                              ? 'bg-rose-55 text-rose-700 border border-rose-100' 
+                              : 'bg-indigo-50 text-indigo-700 border border-indigo-100'
+                          }`}>
+                            {u.role}
+                          </span>
+                        </td>
+                        <td className="p-3 font-bold text-slate-800 font-mono">
+                          ${totalHoldings.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          <span className="text-[9px] text-slate-450 block font-sans font-medium">({userAccounts.length} accounts)</span>
+                        </td>
+                        <td className="p-3 text-right">
+                          <div className="flex justify-end gap-1.5">
+                            {userAccounts.length === 0 ? (
+                              <span className="text-[10px] text-slate-400 italic py-1 px-2 block">No accounts</span>
+                            ) : userAccounts.length === 1 ? (
+                              <button 
+                                onClick={() => handleAccountChange(userAccounts[0].id)}
+                                className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition select-none ${
+                                  isSelectedUser 
+                                    ? 'bg-slate-900 text-white' 
+                                    : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                                }`}
+                              >
+                                {isSelectedUser ? 'Selected' : 'Select'}
+                              </button>
+                            ) : (
+                              <select
+                                onChange={(e) => handleAccountChange(e.target.value)}
+                                value={userAccounts.some(a => a.id === selectedAccId) ? selectedAccId : ''}
+                                className="p-1 px-2 text-[10px] bg-white border border-slate-200 rounded-lg font-bold text-slate-850 outline-none max-w-[140px] shadow-sm cursor-pointer"
+                              >
+                                <option value="" disabled>Select...</option>
+                                {userAccounts.map(a => (
+                                  <option key={a.id} value={a.id}>
+                                    {a.type.toUpperCase()} ({a.number.replace('**** ', '')})
+                                  </option>
+                                ))}
+                              </select>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {filteredUsers.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="p-8 text-center text-slate-450 italic font-semibold">
+                        No matches found for "{searchQuery}".
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
 
-          <div className="sleek-card bg-slate-900 text-white">
-            <h3 className="font-bold mb-4">Master Security Panel</h3>
-            <p className="text-xs text-slate-400 mb-6 font-medium italic">Administrative locks and verification status.</p>
-            <div className="space-y-6">
-              <div className="space-y-3">
-                <div 
-                  onClick={() => setAccountStatus(prev => prev === 'active' ? 'disabled' : 'active')}
-                  className={`flex justify-between items-center p-4 rounded-xl cursor-pointer transition-all border ${
-                    accountStatus === 'disabled' 
-                      ? 'bg-red-500/20 border-red-500/50' 
-                      : 'bg-white/5 border-white/10 hover:bg-white/10'
-                  }`}
-                >
-                   <div className="flex items-center gap-3">
-                     <ShieldCheck size={20} className={accountStatus === 'disabled' ? 'text-red-400' : 'text-emerald-400'} />
-                     <div>
-                        <p className="text-sm font-bold">Account Access</p>
-                        <p className="text-[10px] text-slate-400 uppercase font-bold">
-                          {accountStatus === 'active' ? 'Full Access' : 'Completely Frozen'}
-                        </p>
-                     </div>
-                   </div>
-                   <span className={`px-2 py-1 text-[9px] font-bold uppercase rounded ${
-                     accountStatus === 'active' 
-                       ? 'bg-emerald-400/20 text-emerald-400' 
-                       : 'bg-red-400/20 text-red-400'
-                   }`}>
-                     {accountStatus}
-                   </span>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <div className="sleek-card animate-in fade-in duration-300">
+              <h3 className="font-bold text-slate-800 mb-6">Modify Entity Profile</h3>
+              <div className="space-y-4">
+                <div>
+                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Display Name</label>
+                  <input 
+                    type="text"
+                    placeholder="Full Name"
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800"
+                  />
                 </div>
-
-                <div 
-                  onClick={() => setIsDepositRestricted(prev => !prev)}
-                  className={`flex justify-between items-center p-4 rounded-xl cursor-pointer transition-all border ${
-                    isDepositRestricted 
-                      ? 'bg-amber-500/20 border-amber-500/50' 
-                      : 'bg-white/5 border-white/10 hover:bg-white/10'
-                  }`}
-                >
-                   <div className="flex items-center gap-3">
-                     <Database size={20} className={isDepositRestricted ? 'text-amber-400' : 'text-indigo-400'} />
-                     <div>
-                        <p className="text-sm font-bold">Inbound Deposits</p>
-                        <p className="text-[10px] text-slate-400 uppercase font-bold">
-                          {isDepositRestricted ? 'Incoming Blocked' : 'Allowed'}
-                        </p>
-                     </div>
-                   </div>
-                   <span className={`px-2 py-1 text-[9px] font-bold uppercase rounded ${
-                     !isDepositRestricted 
-                       ? 'bg-indigo-400/20 text-indigo-400' 
-                       : 'bg-amber-400/20 text-amber-400'
-                   }`}>
-                     {isDepositRestricted ? 'Restricted' : 'Open'}
-                   </span>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Balance Override</label>
+                    <input 
+                      type="number"
+                      value={newBalance}
+                      onChange={(e) => setNewBalance(e.target.value)}
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Credit limit</label>
+                    <input 
+                      type="number"
+                      value={newCredit}
+                      onChange={(e) => setNewCredit(e.target.value)}
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800"
+                    />
+                  </div>
                 </div>
+                <button onClick={handleUpdateAccount} className="w-full sleek-button-primary">
+                  Save Profile Changes
+                </button>
               </div>
-
-              <button 
-                onClick={handleUpdateAccount}
-                className={`w-full py-3 rounded-xl text-xs font-bold uppercase transition-all ${
-                  accountStatus === 'disabled' ? 'bg-red-600 hover:bg-red-700' : 'bg-brand-primary hover:bg-brand-primary/90'
-                }`}
-              >
-                Apply Master Restrictions
-              </button>
             </div>
 
-            <div className="mt-8 pt-8 border-t border-white/10 space-y-4">
-              <h4 className="text-[11px] font-bold uppercase tracking-widest text-slate-400">Target User Deposit Details</h4>
-              <div className="space-y-3">
-                <input 
-                  placeholder="PayPal email" 
-                  value={pp} onChange={e => setPp(e.target.value)}
-                  className="w-full bg-white/5 border border-white/10 rounded-lg p-2 text-xs outline-none focus:bg-white/10"
-                />
-                <input 
-                  placeholder="Cash App tag" 
-                  value={ca} onChange={e => setCa(e.target.value)}
-                  className="w-full bg-white/5 border border-white/10 rounded-lg p-2 text-xs outline-none focus:bg-white/10"
-                />
-                <input 
-                  placeholder="Zelle Info" 
-                  value={zl} onChange={e => setZl(e.target.value)}
-                  className="w-full bg-white/5 border border-white/10 rounded-lg p-2 text-xs outline-none focus:bg-white/10"
-                />
-                <input 
-                   placeholder="Bitcoin Address" 
-                   value={bc} onChange={e => setBc(e.target.value)}
-                   className="w-full bg-white/5 border border-white/10 rounded-lg p-2 text-xs outline-none focus:bg-white/10"
-                />
-                <textarea 
-                   placeholder="Bank Wire Details (ACH/Routing)" 
-                   value={bi} onChange={e => setBi(e.target.value)}
-                   className="w-full bg-white/5 border border-white/10 rounded-lg p-2 text-xs outline-none focus:bg-white/10 h-20"
-                />
+            <div className="sleek-card bg-slate-900 text-white animate-in fade-in duration-300">
+              <h3 className="font-bold mb-4">Master Security Panel</h3>
+              <p className="text-xs text-slate-400 mb-6 font-medium italic">Administrative locks and verification status.</p>
+              <div className="space-y-6">
+                <div className="space-y-3">
+                  <div 
+                    onClick={() => setAccountStatus(prev => prev === 'active' ? 'disabled' : 'active')}
+                    className={`flex justify-between items-center p-4 rounded-xl cursor-pointer transition-all border ${
+                      accountStatus === 'disabled' 
+                        ? 'bg-red-500/20 border-red-500/50' 
+                        : 'bg-white/5 border-white/10 hover:bg-white/10'
+                    }`}
+                  >
+                     <div className="flex items-center gap-3">
+                       <ShieldCheck size={20} className={accountStatus === 'disabled' ? 'text-red-400' : 'text-emerald-400'} />
+                       <div>
+                          <p className="text-sm font-bold">Account Access</p>
+                          <p className="text-[10px] text-slate-400 uppercase font-bold">
+                            {accountStatus === 'active' ? 'Full Access' : 'Completely Frozen'}
+                          </p>
+                       </div>
+                     </div>
+                     <span className={`px-2 py-1 text-[9px] font-bold uppercase rounded ${
+                       accountStatus === 'active' 
+                         ? 'bg-emerald-400/20 text-emerald-400' 
+                         : 'bg-red-400/20 text-red-400'
+                     }`}>
+                       {accountStatus}
+                     </span>
+                  </div>
+
+                  <div 
+                    onClick={() => setIsDepositRestricted(prev => !prev)}
+                    className={`flex justify-between items-center p-4 rounded-xl cursor-pointer transition-all border ${
+                      isDepositRestricted 
+                        ? 'bg-amber-500/20 border-amber-500/50' 
+                        : 'bg-white/5 border-white/10 hover:bg-white/10'
+                    }`}
+                  >
+                     <div className="flex items-center gap-3">
+                       <Database size={20} className={isDepositRestricted ? 'text-amber-400' : 'text-indigo-400'} />
+                       <div>
+                          <p className="text-sm font-bold">Inbound Deposits</p>
+                          <p className="text-[10px] text-slate-400 uppercase font-bold">
+                            {isDepositRestricted ? 'Incoming Blocked' : 'Allowed'}
+                          </p>
+                       </div>
+                     </div>
+                     <span className={`px-2 py-1 text-[9px] font-bold uppercase rounded ${
+                       !isDepositRestricted 
+                         ? 'bg-indigo-400/20 text-indigo-400' 
+                         : 'bg-amber-400/20 text-amber-400'
+                     }`}>
+                       {isDepositRestricted ? 'Restricted' : 'Open'}
+                     </span>
+                  </div>
+                </div>
+
                 <button 
-                  onClick={handleUpdateDepositDetails}
-                  className="w-full py-2 bg-white/20 hover:bg-white/30 rounded-lg text-xs font-bold uppercase tracking-wider"
+                  onClick={handleUpdateAccount}
+                  className={`w-full py-3 rounded-xl text-xs font-bold uppercase transition-all ${
+                    accountStatus === 'disabled' ? 'bg-red-600 hover:bg-red-700' : 'bg-brand-primary hover:bg-brand-primary/90'
+                  }`}
                 >
-                  Secured Injection
+                  Apply Master Restrictions
                 </button>
+              </div>
+
+              <div className="mt-8 pt-8 border-t border-white/10 space-y-4">
+                <h4 className="text-[11px] font-bold uppercase tracking-widest text-slate-400">Target User Deposit Details</h4>
+                <div className="space-y-3">
+                  <input 
+                    placeholder="PayPal email" 
+                    value={pp} onChange={e => setPp(e.target.value)}
+                    className="w-full bg-white/5 border border-white/10 rounded-lg p-2 text-xs outline-none focus:bg-white/10"
+                  />
+                  <input 
+                    placeholder="Cash App tag" 
+                    value={ca} onChange={e => setCa(e.target.value)}
+                    className="w-full bg-white/5 border border-white/10 rounded-lg p-2 text-xs outline-none focus:bg-white/10"
+                  />
+                  <input 
+                    placeholder="Zelle Info" 
+                    value={zl} onChange={e => setZl(e.target.value)}
+                    className="w-full bg-white/5 border border-white/10 rounded-lg p-2 text-xs outline-none focus:bg-white/10"
+                  />
+                  <input 
+                     placeholder="Bitcoin Address" 
+                     value={bc} onChange={e => setBc(e.target.value)}
+                     className="w-full bg-white/5 border border-white/10 rounded-lg p-2 text-xs outline-none focus:bg-white/10"
+                  />
+                  <textarea 
+                     placeholder="Bank Wire Details (ACH/Routing)" 
+                     value={bi} onChange={e => setBi(e.target.value)}
+                     className="w-full bg-white/5 border border-white/10 rounded-lg p-2 text-xs outline-none focus:bg-white/10 h-20"
+                  />
+                  <button 
+                    onClick={handleUpdateDepositDetails}
+                    className="w-full py-2 bg-white/20 hover:bg-white/30 rounded-lg text-xs font-bold uppercase tracking-wider"
+                  >
+                    Secured Injection
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -599,6 +870,32 @@ export const AdminPanel = () => {
                 </select>
               </div>
             </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Transaction Status</label>
+                <select 
+                  value={txStatus}
+                  onChange={(e) => setTxStatus(e.target.value as any)}
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800"
+                >
+                  <option value="completed">Approved / Completed</option>
+                  <option value="pending">Pending Auth</option>
+                  <option value="rejected">Failed / Rejected</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Override Date (Optional)</label>
+                <input 
+                  type="datetime-local"
+                  value={txDate}
+                  onChange={(e) => setTxDate(e.target.value)}
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800"
+                />
+                <p className="text-[10px] text-slate-400 mt-1 italic">Leave blank to use current runtime date.</p>
+              </div>
+            </div>
+
             <button onClick={handleAddTx} className="w-full sleek-button-primary">
               Append Transaction & Settle Balance
             </button>
@@ -655,14 +952,15 @@ export const AdminPanel = () => {
         <div className="space-y-6">
            <h3 className="text-xl font-bold text-slate-800">Pending Asset Verifications</h3>
            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {transactions.filter(t => t.status === 'pending').map(tx => {
+              {transactions.filter(t => t.status === 'pending' && !t.description.startsWith('Incoming Transfer Request')).map(tx => {
                 const acc = accounts.find(a => a.id === tx.accountId);
+                const destAcc = tx.toAccountId ? accounts.find(a => a.id === tx.toAccountId) : null;
                 return (
                   <div key={tx.id} className="sleek-card border-amber-100 bg-amber-50/20">
                      <div className="flex justify-between items-start mb-4">
                         <div>
                            <p className="text-xs font-bold text-amber-600 uppercase tracking-widest mb-1">Queue ID: {tx.id}</p>
-                           <h4 className="font-bold text-slate-800">{tx.description}</h4>
+                           <h4 className="font-bold text-slate-800 text-sm">{tx.description}</h4>
                         </div>
                         <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase ${tx.type === 'debit' ? 'bg-red-100 text-red-600' : 'bg-emerald-100 text-emerald-600'}`}>
                            {tx.type === 'debit' ? 'Outbound' : 'Inbound'}
@@ -673,6 +971,12 @@ export const AdminPanel = () => {
                            <span className="text-slate-500">Source Entity</span>
                            <span className="font-bold text-slate-800">{acc?.name || 'Unknown'}</span>
                         </div>
+                        {destAcc && (
+                          <div className="flex justify-between text-xs">
+                             <span className="text-slate-500">Recipient Entity</span>
+                             <span className="font-bold text-slate-800">{destAcc.name}</span>
+                          </div>
+                        )}
                         <div className="flex justify-between text-xs">
                            <span className="text-slate-500">Asset Value</span>
                            <span className="font-bold text-slate-800">${Math.abs(tx.amount).toLocaleString()}</span>
@@ -699,13 +1003,191 @@ export const AdminPanel = () => {
                   </div>
                 );
               })}
-              {transactions.filter(t => t.status === 'pending').length === 0 && (
+              {transactions.filter(t => t.status === 'pending' && !t.description.startsWith('Incoming Transfer Request')).length === 0 && (
                 <div className="lg:col-span-2 py-20 text-center bg-white border border-dashed border-slate-200 rounded-3xl">
                    <ShieldCheck size={48} className="text-slate-200 mx-auto mb-4" />
                    <p className="text-slate-400 font-medium">All systems verified. No pending asset transfers.</p>
                 </div>
               )}
            </div>
+        </div>
+      )}
+
+      {activeView === 'messages' && (
+        <div className="space-y-4" id="admin-sc-console">
+          {/* Admin Header Ribbon */}
+          <div className="bg-slate-900 text-white p-4.5 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border border-slate-800 shadow-md">
+            <div>
+              <div className="inline-flex items-center gap-2 bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-widest">
+                <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-ping" /> Global Operations Node
+              </div>
+              <h3 className="text-lg font-black tracking-tight mt-1">Resolution Communications Hub</h3>
+              <p className="text-[11px] text-slate-400 font-semibold">Triage secure correspondence, audit customer compliance logs, and dispatch official executive resolutions.</p>
+            </div>
+            <div className="text-right flex items-center gap-2 sm:self-center font-mono text-[10px] bg-slate-800/80 px-3 py-1.5 rounded-xl border border-white/5">
+              <span className="text-slate-500 font-medium">Pending Queue:</span>
+              <span className="font-extrabold text-indigo-400">{messages.filter(m => m.status === 'open').length} Threads</span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[550px]">
+            {/* Left Column: Messages List - hidden on mobile when viewing details */}
+            <div className={`${selectedMsg ? 'hidden lg:flex' : 'flex'} lg:col-span-1 bg-white border border-slate-200 rounded-2xl flex flex-col overflow-hidden shadow-sm`}>
+              <div className="p-4 border-b border-slate-150 bg-slate-50 flex justify-between items-center shrink-0">
+                <span className="font-black text-[10px] text-slate-500 uppercase tracking-widest">Client Requests Register</span>
+                <span className="text-[9px] font-black px-2 py-0.5 bg-slate-900 text-white rounded-lg font-mono">
+                  Total: {messages.length}
+                </span>
+              </div>
+              
+              <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
+                {messages.map(msg => {
+                  const isSelected = selectedMsg?.id === msg.id;
+                  return (
+                    <div
+                      key={msg.id}
+                      onClick={() => {
+                        setSelectedMsg(msg);
+                        setReplyText('');
+                      }}
+                      className={`p-4 cursor-pointer transition-all border-l-4 ${
+                        isSelected 
+                          ? 'bg-slate-50 border-slate-900' 
+                          : 'border-transparent hover:bg-slate-50/40'
+                      }`}
+                    >
+                      <div className="flex justify-between items-center mb-1">
+                        <span className="font-extrabold text-xs text-slate-900 uppercase tracking-tight">{msg.userName}</span>
+                        <span className="text-[9px] font-mono text-slate-400">{new Date(msg.date).toLocaleDateString()}</span>
+                      </div>
+                      <p className="text-xs font-bold text-slate-700 truncate mb-1.5">{msg.subject}</p>
+                      <div className="flex justify-between items-center gap-2">
+                        <span className="text-[10px] text-slate-400 font-medium truncate max-w-[140px] font-mono">[UID: {msg.userId.substring(0,6)}] {msg.text}</span>
+                        <span className={`px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider ${
+                          msg.status === 'open' 
+                            ? 'bg-amber-100 text-amber-800 border border-amber-200' 
+                            : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                        }`}>
+                          {msg.status}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+                {messages.length === 0 && (
+                  <div className="p-10 text-center text-slate-400 text-xs italic flex flex-col items-center justify-center h-full">
+                    <MessageSquare size={32} className="text-slate-200 mb-2" />
+                    <span>No secure communication logs.</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Right Column: Active Thread Transcript - hidden on mobile when list is shown */}
+            <div className={`${!selectedMsg ? 'hidden lg:flex' : 'flex'} lg:col-span-2 bg-white border border-slate-200 rounded-2xl flex flex-col overflow-hidden shadow-sm`}>
+              {selectedMsg ? (
+                <div className="flex flex-col h-full">
+                  {/* Message Header */}
+                  <div className="p-4 border-b border-slate-250 bg-slate-900 text-white flex justify-between items-center shrink-0">
+                    <div className="flex items-center min-w-0">
+                      {/* Mobile Back Button */}
+                      <button
+                        onClick={() => setSelectedMsg(null)}
+                        className="lg:hidden p-1.5 bg-slate-800 rounded-xl text-slate-300 mr-2.5 hover:bg-slate-700 transition"
+                      >
+                        <ArrowLeft size={14} />
+                      </button>
+                      <div className="truncate">
+                        <span className="text-[8px] font-mono font-bold text-slate-400 uppercase tracking-wider">SECURE ADVISING PLATFORM</span>
+                        <h4 className="font-black text-white text-xs sm:text-sm uppercase tracking-wider truncate">{selectedMsg.subject}</h4>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={() => handleToggleResolve(selectedMsg.id)}
+                        className={`px-3 py-1 rounded-xl text-[9px] font-black uppercase tracking-wider transition-colors ${
+                          selectedMsg.status === 'open'
+                            ? 'bg-emerald-500 hover:bg-emerald-600 text-white'
+                            : 'bg-amber-500 hover:bg-amber-600 text-white'
+                        }`}
+                      >
+                        {selectedMsg.status === 'open' ? 'Mark Resolved' : 'Reopen Thread'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Chat Transcript Panel */}
+                  <div className="flex-1 p-4 sm:p-5 overflow-y-auto bg-slate-50/50 space-y-4">
+                    
+                    {/* Customer Original Statement */}
+                    <div className="flex flex-col items-start max-w-[85%]">
+                      <p className="text-[9px] text-slate-500 font-black mb-1 uppercase tracking-wider flex items-center gap-1">
+                        Client: <span className="font-extrabold text-slate-800 select-all font-mono">{selectedMsg.userName}</span>
+                      </p>
+                      <div className="bg-white border border-slate-200 text-slate-800 text-xs px-4 py-3 rounded-2xl rounded-tl-none shadow-sm font-semibold select-text break-words w-full">
+                        {selectedMsg.text}
+                      </div>
+                      <span className="text-[8px] text-slate-400 font-mono mt-1">{new Date(selectedMsg.date).toLocaleString()}</span>
+                    </div>
+
+                    {/* Replies list */}
+                    {selectedMsg.replies.map((rep) => {
+                      const isAdminReply = rep.sender === 'admin';
+                      return (
+                        <div
+                          key={rep.id}
+                          className={`flex flex-col max-w-[85%] ${isAdminReply ? 'items-end ml-auto' : 'items-start mr-auto'}`}
+                        >
+                          <p className="text-[9px] text-slate-500 font-bold mb-1 uppercase tracking-widest">
+                            {isAdminReply ? (
+                              <span className="text-slate-700 bg-slate-150 border border-slate-200 px-1.5 py-0.5 rounded font-black text-[8px]">You (Staff)</span>
+                            ) : (
+                              <span className="font-mono">{selectedMsg.userName}</span>
+                            )}
+                          </p>
+                          <div className={`text-xs px-4 py-3 rounded-2xl shadow-sm font-semibold break-words w-full ${
+                            isAdminReply 
+                              ? 'bg-slate-900 text-white rounded-tr-none' 
+                              : 'bg-white border border-slate-200 text-slate-800 rounded-tl-none'
+                          }`}>
+                            {rep.text}
+                          </div>
+                          <span className="text-[8px] text-slate-400 font-mono mt-1 font-semibold">{new Date(rep.date).toLocaleString()}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Reply drafting form */}
+                  <div className="p-3.5 border-t border-slate-150 bg-white shrink-0">
+                    <form onSubmit={handleSendReply} className="flex gap-2">
+                      <input
+                        type="text"
+                        placeholder={selectedMsg.status === 'resolved' ? "Ticket resolved. Enter message to reopen and reply..." : "Draft response parameters to send to client portal..."}
+                        value={replyText}
+                        onChange={(e) => setReplyText(e.target.value)}
+                        className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-3 text-xs outline-none focus:bg-white focus:ring-2 focus:ring-slate-900/5 focus:border-slate-800 transition-all font-sans text-slate-800 font-semibold"
+                      />
+                      <button
+                        type="submit"
+                        disabled={sendingReply || !replyText.trim()}
+                        className="px-5 py-3 bg-slate-900 hover:bg-slate-850 disabled:bg-slate-300 text-white text-xs font-bold uppercase tracking-widest rounded-xl transition-all shadow-md shrink-0 flex items-center gap-1 select-none"
+                      >
+                        <Send size={12} />
+                        <span className="hidden sm:inline">Transmit</span>
+                      </button>
+                    </form>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex-1 flex flex-col items-center justify-center text-slate-400 p-8 text-center bg-slate-50/10">
+                  <MessageSquare size={44} className="text-slate-200 mb-3" />
+                  <h4 className="font-bold text-slate-800 mb-1 text-sm">Dialogue Inspector Offline</h4>
+                  <p className="text-xs max-w-xs text-slate-400 leading-relaxed font-semibold">Select a client correspondence thread from the left register stream to inspect and dispatch responses.</p>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
 

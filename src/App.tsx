@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   LayoutDashboard, 
@@ -16,7 +16,11 @@ import {
   ArrowRight,
   Users,
   Landmark,
-  ShieldAlert
+  ShieldAlert,
+  Mail,
+  MessageSquare,
+  HardDrive,
+  Upload
 } from 'lucide-react';
 import { api } from './services/api';
 import { Account, Transaction, Bill, User } from './types';
@@ -27,6 +31,7 @@ import { TransferModal } from './components/modals/TransferModal';
 import { DepositModal } from './components/modals/DepositModal';
 import { SpendingChart, NetWorthChart } from './components/dashboard/AnalyticsCharts';
 import { AdminPanel } from './components/admin/AdminPanel';
+import { SupportPanel } from './components/support/SupportPanel';
 import { SplashScreen } from './components/ui/SplashScreen';
 
 const SidebarItem = ({ icon: Icon, label, active, onClick }: any) => (
@@ -59,6 +64,45 @@ export default function App() {
   const [savingProfile, setSavingProfile] = useState(false);
   const [resetPassEmail, setResetPassEmail] = useState(user?.email || '');
   const [newPass, setNewPass] = useState('');
+
+  const [isDragging, setIsDragging] = useState(false);
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = () => {
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      handleFileChange(e.dataTransfer.files[0]);
+    }
+  };
+
+  const handleFileChange = (file: File) => {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      alert('File type must be an image.');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      alert('Premium profile image limit is 5MB.');
+      return;
+    }
+    
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        setEditPhoto(reader.result);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
 
   useEffect(() => {
     if (user) {
@@ -166,6 +210,10 @@ export default function App() {
               </div>
             </div>
             <p className="text-[8px] font-bold text-slate-400 uppercase tracking-[0.3em] mt-2">Executive Portal</p>
+            <div className="mt-2 text-[10px] font-bold text-indigo-750 bg-indigo-50/70 border border-indigo-100 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5 w-max">
+              <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-pulse" />
+              <span>30-Day Storage Active</span>
+            </div>
           </div>
 
           <nav className="space-y-1">
@@ -198,6 +246,12 @@ export default function App() {
               label="Settings" 
               active={activeTab === 'settings'} 
               onClick={() => setActiveTab('settings')}
+            />
+            <SidebarItem 
+              icon={Mail} 
+              label="Support Center" 
+              active={activeTab === 'support'} 
+              onClick={() => setActiveTab('support')}
             />
             {isAdmin && (
               <SidebarItem 
@@ -530,29 +584,64 @@ export default function App() {
                <div className="space-y-8">
                   <div className="sleek-card">
                      <h3 className="font-bold text-slate-800 border-b border-slate-100 pb-4 mb-8 text-blue-900 uppercase tracking-tighter">Executive Personal Details</h3>
-                     <div className="flex items-center gap-8 mb-10">
-                        <div className="relative group shrink-0">
-                          <div className="w-24 h-24 rounded-2xl bg-indigo-50 border-4 border-slate-100 flex items-center justify-center overflow-hidden font-bold text-2xl text-indigo-600">
-                            {editPhoto ? (
-                              <img src={editPhoto} className="w-full h-full object-cover" alt="Profile" />
-                            ) : (
-                              user.displayName?.charAt(0) || user.email?.charAt(0).toUpperCase()
-                            )}
-                          </div>
-                          <button 
-                            onClick={() => {
-                              const url = prompt('Enter a direct URL for your profile image (or leave empty to use avatar service):');
-                              if (url !== null) setEditPhoto(url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.email}`);
+                     <div className="flex flex-col sm:flex-row items-center gap-8 mb-10">
+                        <div 
+                          onDragOver={handleDragOver}
+                          onDragLeave={handleDragLeave}
+                          onDrop={handleDrop}
+                          onClick={() => document.getElementById('hidden-profile-input')?.click()}
+                          className={`w-28 h-28 rounded-2xl border-2 border-dashed flex flex-col items-center justify-center relative overflow-hidden cursor-pointer transition-all shrink-0 ${
+                            isDragging 
+                              ? 'border-indigo-600 bg-indigo-50/40 scale-105 shadow-md' 
+                              : editPhoto 
+                                ? 'border-slate-200 hover:border-indigo-400 bg-slate-50' 
+                                : 'border-slate-300 hover:border-indigo-400 bg-slate-50/50 hover:bg-slate-50'
+                          }`}
+                        >
+                          <input 
+                            type="file" 
+                            id="hidden-profile-input" 
+                            accept="image/*" 
+                            className="hidden" 
+                            onChange={(e) => {
+                              if (e.target.files && e.target.files[0]) {
+                                handleFileChange(e.target.files[0]);
+                              }
                             }}
-                            className="absolute inset-0 bg-black/40 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer"
-                          >
-                            <span className="text-white text-[10px] font-bold uppercase tracking-widest">Update</span>
-                          </button>
+                          />
+                          {editPhoto ? (
+                            <>
+                              <img src={editPhoto} className="w-full h-full object-cover" alt="Profile" />
+                              <div className="absolute inset-x-0 bottom-0 bg-black/60 transition-opacity flex flex-col items-center justify-center text-white py-1.5 text-center">
+                                <Upload size={14} className="mb-0.5" />
+                                <span className="text-[8px] font-bold uppercase tracking-wider">Change Photo</span>
+                              </div>
+                            </>
+                          ) : (
+                            <div className="text-center p-3 flex flex-col items-center justify-center text-slate-400">
+                              <Upload size={22} className="mb-1.5 text-slate-400" />
+                              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-600 block">Upload Photo</span>
+                              <span className="text-[8px] text-slate-400 block mt-0.5">Drag & drop or Click</span>
+                            </div>
+                          )}
                         </div>
-                        <div>
-                           <p className="text-lg font-bold text-slate-800 capitalize">{user.displayName || 'Member'}</p>
+                        <div className="text-center sm:text-left">
+                           <p className="text-lg font-bold text-slate-800 capitalize">{user?.displayName || 'Member'}</p>
                            <p className="text-sm text-slate-500">{isAdmin ? 'Executive Administrator' : 'Premium Member'}</p>
-                           <button onClick={() => alert('Membership ID: ' + user.uid)} className="text-indigo-600 text-xs font-bold uppercase tracking-widest mt-3 hover:underline">Membership Info</button>
+                           <div className="flex flex-wrap items-center justify-center sm:justify-start gap-4 mt-3">
+                             <button onClick={() => alert('Membership ID: ' + user?.uid)} className="text-indigo-600 text-xs font-bold uppercase tracking-widest hover:underline">Membership Info</button>
+                             <span className="text-slate-300">|</span>
+                             <button 
+                               onClick={(e) => {
+                                 e.stopPropagation();
+                                 const url = prompt('Enter a direct URL for your profile image:');
+                                 if (url !== null) setEditPhoto(url);
+                               }}
+                               className="text-slate-500 text-xs font-bold uppercase tracking-widest hover:underline"
+                             >
+                               Or set via URL
+                             </button>
+                           </div>
                         </div>
                      </div>
                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
@@ -630,32 +719,56 @@ export default function App() {
                               <div className="absolute right-1 top-1 w-4 h-4 bg-white rounded-full shadow-md" />
                            </div>
                         </div>
+                        <div className="py-6">
+                           <div className="flex flex-col gap-2">
+                              <p className="font-bold text-indigo-900 uppercase tracking-tight text-xs">Sovereign 30-Day Storage & Ledger Policy</p>
+                              <p className="text-xs text-slate-500 leading-relaxed">
+                                To protect supreme confidentiality and comply with offshore sovereign data protection standards, New Age of America enforces an automatic core ledger retainer policy.
+                              </p>
+                              <p className="text-xs text-slate-500 leading-relaxed">
+                                Every piece of data—including interest rate settings, system preferences, custom display settings, passwords, and correspondence—is maintained for precisely 30 days. Active sessions refresh this retainer, while 30 continuous days of inactivity automatically trigger cryptographic shredding.
+                              </p>
+                           </div>
+                           <div className="mt-4.5 inline-flex items-center gap-2 px-3 py-1.5 bg-emerald-50 border border-emerald-100 text-emerald-800 rounded-xl text-[10px] font-black uppercase tracking-wider">
+                              <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" /> 30-Day Storage Cycle Enforced (Active)
+                           </div>
+                        </div>
                      </div>
                   </div>
                </div>
+            </motion.div>
+          )}
+
+          {activeTab === 'support' && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+            >
+              <SupportPanel user={user} />
             </motion.div>
           )}
         </div>
       </main>
 
       {/* Mobile Bottom Navigation */}
-      <div className="lg:hidden fixed bottom-0 left-0 right-0 h-16 bg-white border-t border-slate-200 px-2 flex items-center justify-around z-50">
+      <div className="lg:hidden fixed bottom-0 left-0 right-0 h-16 bg-white border-t border-slate-200 px-1 flex items-center justify-around z-50">
         {[
           { id: 'dashboard', icon: LayoutDashboard, label: 'Home' },
           { id: 'transfers', icon: ArrowLeftRight, label: 'Pay' },
           { id: 'bills', icon: ReceiptText, label: 'Bills' },
-          { id: 'admin', icon: ShieldAlert, label: 'Admin' },
+          ...(isAdmin ? [{ id: 'admin', icon: ShieldAlert, label: 'Admin' }] : []),
+          { id: 'support', icon: Mail, label: 'Support' },
           { id: 'settings', icon: Settings, label: 'You' },
         ].map((item) => (
           <button
             key={item.id}
             onClick={() => setActiveTab(item.id)}
-            className={`flex flex-col items-center gap-1 p-2 min-w-[64px] transition-colors ${
+            className={`flex flex-col items-center gap-1 py-2 flex-1 min-w-0 transition-colors ${
               activeTab === item.id ? 'text-indigo-600' : 'text-slate-400'
             }`}
           >
-            <item.icon size={20} strokeWidth={activeTab === item.id ? 2.5 : 2} />
-            <span className="text-[10px] font-bold uppercase tracking-wider">{item.label}</span>
+            <item.icon size={18} strokeWidth={activeTab === item.id ? 2.5 : 2} />
+            <span className="text-[8px] sm:text-[10px] font-bold uppercase tracking-wider truncate max-w-full">{item.label}</span>
           </button>
         ))}
       </div>
