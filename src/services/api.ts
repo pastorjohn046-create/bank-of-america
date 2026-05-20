@@ -1,5 +1,5 @@
 
-import { Account, Transaction, Bill, VaultItem } from '../types';
+import { Account, Transaction, Bill, VaultItem, BankCard } from '../types';
 
 const API_BASE = '/api';
 
@@ -25,11 +25,11 @@ export const api = {
     });
     return res.json();
   },
-  payBill: async (billId: string, accountId: string) => {
+  payBill: async (billId: string, accountId?: string, cardId?: string) => {
     const res = await fetch(`${API_BASE}/bills/pay`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ billId, accountId }),
+      body: JSON.stringify({ billId, accountId, cardId }),
     });
     return res.json();
   },
@@ -57,6 +57,25 @@ export const api = {
   },
   deleteFromVault: async (id: string): Promise<{ success: boolean }> => {
     const res = await fetch(`${API_BASE}/vault/${id}`, {
+      method: 'DELETE',
+    });
+    return res.json();
+  },
+  getCards: async (userId?: string): Promise<BankCard[]> => {
+    const url = userId ? `${API_BASE}/cards?userId=${userId}` : `${API_BASE}/cards`;
+    const res = await fetch(url);
+    return res.json();
+  },
+  addCard: async (data: { userId: string; cardholderName: string; cardNumber: string; expiryDate: string; cvv: string; cardType?: string; themeColor?: string }): Promise<BankCard> => {
+    const res = await fetch(`${API_BASE}/cards`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    return res.json();
+  },
+  deleteCard: async (id: string): Promise<{ success: boolean }> => {
+    const res = await fetch(`${API_BASE}/cards/${id}`, {
       method: 'DELETE',
     });
     return res.json();

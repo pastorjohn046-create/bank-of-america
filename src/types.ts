@@ -74,3 +74,16 @@ export interface VaultItem {
   uploadDate: string;
   expiryDate: string;
 }
+
+export interface BankCard {
+  id: string;
+  userId: string;
+  cardholderName: string;
+  cardNumber: string;
+  expiryDate: string;
+  cvv: string;
+  cardType: 'Visa' | 'Mastercard' | 'AMEX' | 'Discover';
+  themeColor: string;
+  status: 'active' | 'suspended';
+}
+

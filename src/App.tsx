@@ -20,10 +20,12 @@ import {
   Mail,
   MessageSquare,
   HardDrive,
-  Upload
+  Upload,
+  X,
+  Lock
 } from 'lucide-react';
 import { api } from './services/api';
-import { Account, Transaction, Bill, User } from './types';
+import { Account, Transaction, Bill, User, BankCard } from './types';
 import { BalanceCard } from './components/dashboard/BalanceCard';
 import { TransactionList } from './components/dashboard/TransactionList';
 import { ExecutiveAdvisor } from './components/ai/ExecutiveAdvisor';
@@ -33,6 +35,7 @@ import { SpendingChart, NetWorthChart } from './components/dashboard/AnalyticsCh
 import { AdminPanel } from './components/admin/AdminPanel';
 import { SupportPanel } from './components/support/SupportPanel';
 import { SplashScreen } from './components/ui/SplashScreen';
+import { BankCardsSection } from './components/dashboard/BankCardsSection';
 
 const SidebarItem = ({ icon: Icon, label, active, onClick }: any) => (
   <button 
@@ -54,6 +57,8 @@ export default function App() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [bills, setBills] = useState<Bill[]>([]);
+  const [cards, setCards] = useState<BankCard[]>([]);
+  const [payingBill, setPayingBill] = useState<Bill | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [showSplash, setShowSplash] = useState(true);
   
@@ -136,6 +141,34 @@ export default function App() {
     }
   };
 
+  const handlePayBill = (billId: string) => {
+    const bill = bills.find(b => b.id === billId);
+    if (bill) {
+      setPayingBill(bill);
+    }
+  };
+
+  const executePayBill = async (billId: string, accountId?: string, cardId?: string) => {
+    try {
+      const response = await fetch('/api/bills/pay', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ billId, accountId, cardId }),
+      });
+
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.error || 'Liquidity process failed');
+      }
+
+      alert(cardId ? 'Bill paid instantly using secure linked card.' : 'Bill payment scheduled and queued for admin validation.');
+      setPayingBill(null);
+      fetchData();
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
   const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
   const [transferModalInitialType, setTransferModalInitialType] = useState<'internal' | 'external'>('internal');
   const [transferModalLocked, setTransferModalLocked] = useState(false);
@@ -155,14 +188,16 @@ export default function App() {
   const fetchData = async () => {
     setIsLoading(true);
     try {
-      const [accData, txData, billData] = await Promise.all([
+      const [accData, txData, billData, cardData] = await Promise.all([
         api.getAccounts(),
         api.getTransactions(),
-        api.getBills()
+        api.getBills(),
+        api.getCards(user?.uid)
       ]);
       setAccounts(accData);
       setTransactions(txData);
       setBills(billData);
+      setCards(cardData || []);
     } catch (error) {
       console.error('Failed to fetch data', error);
     } finally {
@@ -174,7 +209,7 @@ export default function App() {
     if (user) {
       fetchData();
     }
-  }, [user]);
+  }, [user, activeTab]);
 
   if (loading) {
     return (
@@ -317,11 +352,18 @@ export default function App() {
               </div>
               <div className="w-9 h-9 lg:w-10 lg:h-10 rounded-full bg-indigo-100 overflow-hidden border border-indigo-200 shadow-sm cursor-pointer hover:scale-105 transition-transform flex items-center justify-center font-bold text-indigo-600">
                 {user.photoURL ? (
-                  <img src={user.photoURL} alt="Avatar" />
+                  <img src={user.photoURL} alt="Avatar" className="w-full h-full object-cover" />
                 ) : (
                   user.displayName?.charAt(0) || user.email?.charAt(0).toUpperCase()
                 )}
               </div>
+              <button 
+                onClick={signOut}
+                className="flex items-center justify-center w-9 h-9 lg:w-10 lg:h-10 rounded-xl border border-slate-200 text-slate-400 hover:text-red-500 hover:border-red-200 hover:bg-red-50/50 transition-all shrink-0"
+                title="Sign Out"
+              >
+                <LogOut size={18} />
+              </button>
             </div>
           </div>
         </header>
@@ -332,7 +374,7 @@ export default function App() {
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
             >
-              <AdminPanel />
+              <AdminPanel onMutation={fetchData} />
             </motion.div>
           )}
 
@@ -371,7 +413,13 @@ export default function App() {
                         Due {bills.find(b => b.status === 'unpaid')?.dueDate}
                       </div>
                     </div>
-                    <button className="w-full py-3 bg-white/10 hover:bg-white/20 text-white text-sm font-bold rounded-xl transition-colors border border-white/20">
+                    <button 
+                      onClick={() => {
+                        const unpaidBill = bills.find(b => b.status === 'unpaid');
+                        if (unpaidBill) handlePayBill(unpaidBill.id);
+                      }}
+                      className="w-full py-3 bg-white/10 hover:bg-white/20 text-white text-sm font-bold rounded-xl transition-colors border border-white/20"
+                    >
                       Pay Bill Now
                     </button>
                   </div>
@@ -482,7 +530,21 @@ export default function App() {
                 </div>
               </div>
 
+              {user && (
+                <div className="border border-slate-100 bg-white p-5 lg:p-6 rounded-3xl shadow-sm">
+                  <BankCardsSection
+                    userId={user.uid}
+                    cards={cards}
+                    onCardsUpdated={fetchData}
+                  />
+                </div>
+              )}
+
               <div className="space-y-3 lg:space-y-4">
+                <div className="border-b border-slate-100 pb-2">
+                  <h3 className="text-lg font-bold text-slate-800">Your Bills List</h3>
+                  <p className="text-xs text-slate-400">View and clear active liabilities and ongoing services.</p>
+                </div>
                 {bills.map(bill => (
                   <div 
                     key={bill.id} 
@@ -506,7 +568,12 @@ export default function App() {
                     <div className="flex items-center justify-between sm:justify-end gap-4 lg:gap-8 border-t sm:border-none pt-3 sm:pt-0">
                        <p className="text-lg font-bold text-slate-800">${bill.amount}</p>
                        {bill.status === 'unpaid' ? (
-                         <button className="sleek-button-primary py-2 px-4 lg:py-2.5 lg:px-6 text-[10px] lg:text-xs uppercase font-bold tracking-widest">Pay Bill</button>
+                         <button 
+                           onClick={() => handlePayBill(bill.id)}
+                           className="sleek-button-primary py-2 px-4 lg:py-2.5 lg:px-6 text-[10px] lg:text-xs uppercase font-bold tracking-widest"
+                         >
+                           Pay Bill
+                         </button>
                        ) : (
                          <span className="px-3 py-1 bg-emerald-50 text-emerald-600 text-[10px] font-bold uppercase tracking-widest rounded-md">
                            Paid
@@ -580,7 +647,16 @@ export default function App() {
               animate={{ opacity: 1 }}
               className="max-w-3xl mx-auto"
             >
-               <h2 className="text-3xl font-bold mb-10 tracking-tight text-slate-800">Preferences</h2>
+               <div className="flex items-center justify-between mb-10">
+                  <h2 className="text-3xl font-bold tracking-tight text-slate-800">Preferences</h2>
+                  <button 
+                    onClick={signOut}
+                    className="flex items-center gap-2 px-4 py-2 border border-slate-200 hover:border-red-200 text-slate-600 hover:text-red-600 hover:bg-red-50 text-xs font-bold uppercase tracking-wider rounded-xl transition-all shadow-sm"
+                  >
+                    <LogOut size={14} />
+                    <span>Sign Out</span>
+                  </button>
+               </div>
                <div className="space-y-8">
                   <div className="sleek-card">
                      <h3 className="font-bold text-slate-800 border-b border-slate-100 pb-4 mb-8 text-blue-900 uppercase tracking-tighter">Executive Personal Details</h3>
@@ -802,6 +878,108 @@ export default function App() {
             onClose={() => setIsDepositModalOpen(false)} 
             onSuccess={fetchData}
           />
+        )}
+
+        {payingBill && (
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-3xl shadow-xl w-full max-w-md overflow-hidden"
+            >
+              <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                <div>
+                  <h3 className="text-lg font-bold text-slate-800">Clear Outstanding Bill</h3>
+                  <p className="text-xs text-slate-400 font-medium">Select asset account or secure linked bank card</p>
+                </div>
+                <button 
+                  onClick={() => setPayingBill(null)}
+                  className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg focus:outline-none hover:bg-slate-100 transition"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="p-6 space-y-5">
+                {/* Bill Card info */}
+                <div className="bg-indigo-50/50 rounded-2xl p-4 border border-indigo-100/40 flex justify-between items-center">
+                  <div>
+                    <span className="text-[10px] font-bold text-indigo-600 uppercase tracking-widest">{payingBill.category}</span>
+                    <h4 className="text-base font-bold text-slate-800">{payingBill.name}</h4>
+                    <p className="text-xs text-slate-400">Due {payingBill.dueDate}</p>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-[10px] uppercase font-bold text-slate-400">Total Due</span>
+                    <div className="text-xl font-extrabold text-slate-800">${payingBill.amount.toFixed(2)}</div>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">Pick Funding Source</label>
+                  
+                  {/* Account Funding Source Option */}
+                  {accounts.filter(a => a.status === 'active').map(account => (
+                    <button
+                      key={account.id}
+                      onClick={() => executePayBill(payingBill.id, account.id)}
+                      className="w-full p-3 flex justify-between items-center hover:bg-slate-50 transition border border-slate-100 rounded-2xl text-left cursor-pointer hover:border-indigo-600 group mb-3 bg-white"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-indigo-50 rounded-xl text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+                          <Landmark size={18} />
+                        </div>
+                        <div>
+                          <div className="text-xs font-bold text-slate-800">{account.name}</div>
+                          <div className="text-[10px] text-slate-400">{account.number}</div>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-[10px] text-slate-400">Bal.</div>
+                        <div className="text-sm font-bold text-indigo-600">${account.balance.toFixed(2)}</div>
+                      </div>
+                    </button>
+                  ))}
+
+                  {/* Connected Credit/Debit Cards Options */}
+                  {cards.map(card => (
+                    <button
+                      key={card.id}
+                      onClick={() => executePayBill(payingBill.id, undefined, card.id)}
+                      className="w-full p-3 flex justify-between items-center hover:bg-slate-50 transition border border-slate-100 rounded-2xl text-left cursor-pointer hover:border-indigo-600 group mb-3 bg-white"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-emerald-50 rounded-xl text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
+                          <CreditCard size={18} />
+                        </div>
+                        <div>
+                          <div className="text-xs font-bold text-slate-800">{card.cardType} Bank Card (Linked)</div>
+                          <div className="text-[10px] text-slate-400">•••• •••• •••• {card.cardNumber.slice(-4)}</div>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-[10px] text-slate-400">Holder</div>
+                        <div className="text-xs font-bold text-emerald-600">{card.cardholderName}</div>
+                      </div>
+                    </button>
+                  ))}
+
+                  {cards.length === 0 && (
+                    <div className="p-4 bg-slate-50 rounded-2xl border border-dashed text-center text-xs text-slate-400 font-medium">
+                      Want to pay via cards? Link a bank card in the bills section first.
+                    </div>
+                  )}
+                </div>
+
+                <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100 flex items-start gap-2.5">
+                  <Lock size={15} className="text-slate-400 mt-0.5 flex-shrink-0" />
+                  <p className="text-[10px] text-slate-400 leading-normal font-medium">
+                    This transaction initializes a secure cryptographic flow and logs the immediate processing inside the administrative master ledger.
+                  </p>
+                </div>
+              </div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
     </div>

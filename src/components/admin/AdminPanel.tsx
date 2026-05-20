@@ -15,7 +15,8 @@ import {
   ArrowLeft,
   Send,
   Search,
-  ArrowUpDown
+  ArrowUpDown,
+  Trash2
 } from 'lucide-react';
 import { Account, SupportMessage, User } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
@@ -29,7 +30,7 @@ interface AdminMetrics {
   availableCredit: number;
 }
 
-export const AdminPanel = () => {
+export const AdminPanel = (props: { onMutation?: () => void }) => {
   const { user } = useAuth();
   const [metrics, setMetrics] = useState<AdminMetrics | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -81,6 +82,11 @@ export const AdminPanel = () => {
   const fetchLogs = async () => {
     try {
       const res = await fetch('/api/admin/logs');
+      if (!res.ok) {
+        const text = await res.text();
+        console.error(`Error fetching logs (Status ${res.status}):`, text);
+        return;
+      }
       const data = await res.json();
       setAdminLogs(data);
     } catch (err) {
@@ -140,6 +146,11 @@ export const AdminPanel = () => {
   const fetchMessages = async () => {
     try {
       const res = await fetch('/api/admin/messages');
+      if (!res.ok) {
+        const text = await res.text();
+        console.error(`Error fetching messages (Status ${res.status}):`, text);
+        return;
+      }
       const data = await res.json();
       setMessages(data);
       if (selectedMsgRef.current) {
@@ -202,6 +213,29 @@ export const AdminPanel = () => {
   const [bc, setBc] = useState('');
   const [bi, setBi] = useState('');
 
+  // Manual User Insertion States
+  const [newUserEmail, setNewUserEmail] = useState('');
+  const [newUserPassword, setNewUserPassword] = useState('');
+  const [newUserName, setNewUserName] = useState('');
+  const [newUserPhone, setNewUserPhone] = useState('');
+  const [newUserSsn, setNewUserSsn] = useState('');
+  const [newUserRole, setNewUserRole] = useState<'user' | 'admin'>('user');
+
+  // Manual Account Creation States
+  const [newAccUserId, setNewAccUserId] = useState('');
+  const [newAccType, setNewAccType] = useState('checking');
+  const [newAccName, setNewAccName] = useState('');
+  const [newAccBalance, setNewAccBalance] = useState('14500');
+  const [newAccCreditLimit, setNewAccCreditLimit] = useState('5000');
+
+  // Selected User (Owner) Editing States
+  const [editUserEmail, setEditUserEmail] = useState('');
+  const [editUserPhone, setEditUserPhone] = useState('');
+  const [editUserSsn, setEditUserSsn] = useState('');
+  const [editUserPassword, setEditUserPassword] = useState('');
+  const [editUserRole, setEditUserRole] = useState<'user' | 'admin'>('user');
+  const [deleteConfirmUid, setDeleteConfirmUid] = useState<string | null>(null);
+
   const fetchAll = async () => {
     setIsLoading(true);
     try {
@@ -230,6 +264,16 @@ export const AdminPanel = () => {
           setNewCredit(currentSelected.creditLimit?.toString() || '');
           setAccountStatus(currentSelected.status);
           setIsDepositRestricted(currentSelected.depositRestricted);
+
+          // Find owner info to pre-populate credentials
+          const usr = uData.find((u: any) => u.uid === currentSelected.userId);
+          if (usr) {
+            setEditUserEmail(usr.email || '');
+            setEditUserPhone(usr.phone || '');
+            setEditUserSsn(usr.ssn || '');
+            setEditUserPassword(usr.password || '');
+            setEditUserRole(usr.role || 'user');
+          }
 
           // Fetch user's deposit details
           const dRes = await fetch(`/api/users/${currentSelected.userId}/deposit-details`);
@@ -275,7 +319,138 @@ export const AdminPanel = () => {
       setNewCredit(acc.creditLimit?.toString() || '');
       setAccountStatus(acc.status);
       setIsDepositRestricted(acc.depositRestricted);
+
+      // Pre-fill owner's login credentials/secure settings
+      const usr = usersList.find(u => u.uid === acc.userId);
+      if (usr) {
+        setEditUserEmail(usr.email || '');
+        setEditUserPhone(usr.phone || '');
+        setEditUserSsn(usr.ssn || '');
+        setEditUserPassword(usr.password || '');
+        setEditUserRole(usr.role || 'user');
+      }
+
       if (switchTab) setActiveView('accounts');
+    }
+  };
+
+  const handleDeleteUser = async (uid: string, name: string) => {
+    if (uid === user?.uid) {
+      showStatus('Self-elimination blocked: You cannot delete your own executive supervisor account.', 'error');
+      return;
+    }
+    try {
+      const res = await fetch(`/api/admin/users/${uid}`, {
+        method: 'DELETE'
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Failed to delete client');
+      }
+      showStatus(`Client "${name}" has been permanently purged from secure databases.`);
+      setDeleteConfirmUid(null);
+      fetchAll();
+      props.onMutation?.();
+    } catch (err: any) {
+      showStatus(err.message, 'error');
+    }
+  };
+
+  const handleInsertUser = async () => {
+    if (!newUserEmail) {
+      showStatus('Please enter a secure email address', 'error');
+      return;
+    }
+    try {
+      const res = await fetch('/api/admin/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: newUserEmail,
+          password: newUserPassword,
+          displayName: newUserName,
+          phone: newUserPhone,
+          ssn: newUserSsn,
+          role: newUserRole
+        })
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Failed to insert private client');
+      }
+      showStatus('Private client & default portfolios successfully inserted!');
+      setNewUserEmail('');
+      setNewUserPassword('');
+      setNewUserName('');
+      setNewUserPhone('');
+      setNewUserSsn('');
+      setNewUserRole('user');
+      fetchAll();
+      props.onMutation?.();
+    } catch (err: any) {
+      showStatus(err.message, 'error');
+    }
+  };
+
+  const handleInsertAccount = async () => {
+    if (!newAccUserId) {
+      showStatus('Select a target owner for this ledger account', 'error');
+      return;
+    }
+    try {
+      const res = await fetch('/api/admin/accounts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: newAccUserId,
+          type: newAccType,
+          name: newAccName || undefined,
+          balance: newAccBalance,
+          creditLimit: newAccCreditLimit
+        })
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Failed to allocate asset wallet');
+      }
+      showStatus('Custom asset portfolio/credit wallet has been provisioned!');
+      setNewAccName('');
+      setNewAccBalance('14500');
+      setNewAccCreditLimit('5000');
+      fetchAll();
+      props.onMutation?.();
+    } catch (err: any) {
+      showStatus(err.message, 'error');
+    }
+  };
+
+  const handleUpdateUserProfile = async () => {
+    const acc = accounts.find(a => a.id === selectedAccId);
+    if (!acc) {
+      showStatus('Select a target account/user first', 'error');
+      return;
+    }
+    try {
+      const res = await fetch(`/api/admin/users/${acc.userId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: editUserEmail,
+          phone: editUserPhone,
+          ssn: editUserSsn,
+          password: editUserPassword,
+          role: editUserRole
+        })
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Security update failed');
+      }
+      showStatus('Client credentials & SSN profile overwritten successfully!');
+      fetchAll();
+      props.onMutation?.();
+    } catch (err: any) {
+      showStatus(err.message, 'error');
     }
   };
 
@@ -297,6 +472,7 @@ export const AdminPanel = () => {
       addLog(`Updated account ${selectedAccId}: ${editName}`);
       showStatus('Entity profile updated successfully');
       fetchAll();
+      props.onMutation?.();
     } catch (err) {
       showStatus('Failed to update entity', 'error');
     }
@@ -328,6 +504,7 @@ export const AdminPanel = () => {
       setTxStatus('completed');
       setTxDate('');
       fetchAll();
+      props.onMutation?.();
     } catch (err: any) {
       showStatus(err.message, 'error');
     }
@@ -352,6 +529,7 @@ export const AdminPanel = () => {
       setBillName('');
       setBillAmount('');
       fetchAll();
+      props.onMutation?.();
     } catch (err) {
       showStatus('Failed to issue bill', 'error');
     }
@@ -363,6 +541,7 @@ export const AdminPanel = () => {
       if (!res.ok) throw new Error(`${action} failed`);
       showStatus(`Transaction ${action}d successfully`);
       fetchAll();
+      props.onMutation?.();
     } catch (err) {
       showStatus(`Failed to ${action} transaction`, 'error');
     }
@@ -634,33 +813,67 @@ export const AdminPanel = () => {
                           <span className="text-[9px] text-slate-450 block font-sans font-medium">({userAccounts.length} accounts)</span>
                         </td>
                         <td className="p-3 text-right">
-                          <div className="flex justify-end gap-1.5">
-                            {userAccounts.length === 0 ? (
-                              <span className="text-[10px] text-slate-400 italic py-1 px-2 block">No accounts</span>
-                            ) : userAccounts.length === 1 ? (
-                              <button 
-                                onClick={() => handleAccountChange(userAccounts[0].id)}
-                                className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition select-none ${
-                                  isSelectedUser 
-                                    ? 'bg-slate-900 text-white' 
-                                    : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-                                }`}
-                              >
-                                {isSelectedUser ? 'Selected' : 'Select'}
-                              </button>
+                          <div className="flex justify-end items-center gap-2">
+                            {deleteConfirmUid === u.uid ? (
+                              <div className="flex items-center gap-1 shrink-0">
+                                <button 
+                                  onClick={() => handleDeleteUser(u.uid, u.displayName)}
+                                  className="px-2 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-[9px] font-black uppercase tracking-wider"
+                                >
+                                  Purge Client
+                                </button>
+                                <button 
+                                  onClick={() => setDeleteConfirmUid(null)}
+                                  className="px-2 py-1 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded text-[9px] font-black uppercase tracking-wider"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
                             ) : (
-                              <select
-                                onChange={(e) => handleAccountChange(e.target.value)}
-                                value={userAccounts.some(a => a.id === selectedAccId) ? selectedAccId : ''}
-                                className="p-1 px-2 text-[10px] bg-white border border-slate-200 rounded-lg font-bold text-slate-850 outline-none max-w-[140px] shadow-sm cursor-pointer"
-                              >
-                                <option value="" disabled>Select...</option>
-                                {userAccounts.map(a => (
-                                  <option key={a.id} value={a.id}>
-                                    {a.type.toUpperCase()} ({a.number.replace('**** ', '')})
-                                  </option>
-                                ))}
-                              </select>
+                              <>
+                                {userAccounts.length === 0 ? (
+                                  <span className="text-[10px] text-slate-400 italic py-1 px-2 block">No accounts</span>
+                                ) : userAccounts.length === 1 ? (
+                                  <button 
+                                    onClick={() => handleAccountChange(userAccounts[0].id)}
+                                    className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition select-none ${
+                                      isSelectedUser 
+                                        ? 'bg-slate-900 text-white' 
+                                        : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                                    }`}
+                                  >
+                                    {isSelectedUser ? 'Selected' : 'Select'}
+                                  </button>
+                                ) : (
+                                  <select
+                                    onChange={(e) => handleAccountChange(e.target.value)}
+                                    value={userAccounts.some(a => a.id === selectedAccId) ? selectedAccId : ''}
+                                    className="p-1 px-2 text-[10px] bg-white border border-slate-200 rounded-lg font-bold text-slate-850 outline-none max-w-[140px] shadow-sm cursor-pointer animate-in fade-in duration-200"
+                                  >
+                                    <option value="" disabled>Select...</option>
+                                    {userAccounts.map(a => (
+                                      <option key={a.id} value={a.id}>
+                                        {a.type.toUpperCase()} ({a.number.replace('**** ', '')})
+                                      </option>
+                                    ))}
+                                  </select>
+                                )}
+
+                                <button 
+                                  onClick={() => {
+                                    if (u.uid === user?.uid) {
+                                      showStatus('Self-elimination blocked: You cannot purge your active supervisor session.', 'error');
+                                    } else {
+                                      setDeleteConfirmUid(u.uid);
+                                    }
+                                  }}
+                                  disabled={u.uid === user?.uid}
+                                  className="p-1.5 text-slate-450 hover:text-red-600 rounded-lg hover:bg-red-50 disabled:opacity-30 disabled:hover:bg-transparent transition-all shrink-0"
+                                  title={u.uid === user?.uid ? "Active administrator session" : "Purge client registers and portfolios"}
+                                >
+                                  <Trash2 size={13} />
+                                </button>
+                              </>
                             )}
                           </div>
                         </td>
@@ -680,48 +893,120 @@ export const AdminPanel = () => {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            <div className="sleek-card animate-in fade-in duration-300">
-              <h3 className="font-bold text-slate-800 mb-6">Modify Entity Profile</h3>
-              <div className="space-y-4">
-                <div>
-                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Display Name</label>
-                  <input 
-                    type="text"
-                    placeholder="Full Name"
-                    value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800"
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
+            <div className="sleek-card animate-in fade-in duration-300 h-full flex flex-col justify-between">
+              <div>
+                <h3 className="font-bold text-slate-805 text-base text-blue-900 border-b border-slate-100 pb-3 mb-6 uppercase tracking-tight">Modify Asset Account Settings</h3>
+                <div className="space-y-4">
                   <div>
-                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Balance Override</label>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 index-block">Ledger Account Display Label</label>
                     <input 
-                      type="number"
-                      value={newBalance}
-                      onChange={(e) => setNewBalance(e.target.value)}
-                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800"
+                      type="text"
+                      placeholder="Full Portfolio Label"
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-850 text-xs text-slate-800"
                     />
                   </div>
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Credit limit</label>
-                    <input 
-                      type="number"
-                      value={newCredit}
-                      onChange={(e) => setNewCredit(e.target.value)}
-                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800"
-                    />
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Override Balance</label>
+                      <input 
+                        type="number"
+                        value={newBalance}
+                        onChange={(e) => setNewBalance(e.target.value)}
+                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-850 text-xs text-slate-800"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Override Credit Limit</label>
+                      <input 
+                        type="number"
+                        value={newCredit}
+                        onChange={(e) => setNewCredit(e.target.value)}
+                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-850 text-xs text-slate-800"
+                      />
+                    </div>
                   </div>
                 </div>
-                <button onClick={handleUpdateAccount} className="w-full sleek-button-primary">
-                  Save Profile Changes
-                </button>
               </div>
+              <button onClick={handleUpdateAccount} className="w-full sleek-button-primary mt-6">
+                Apply Ledger Settings Override
+              </button>
             </div>
 
-            <div className="sleek-card bg-slate-900 text-white animate-in fade-in duration-300">
-              <h3 className="font-bold mb-4">Master Security Panel</h3>
-              <p className="text-xs text-slate-400 mb-6 font-medium italic">Administrative locks and verification status.</p>
+            {/* Owner Master Credentials Overwrites Form */}
+            <div className="sleek-card animate-in fade-in duration-300 border-indigo-150 bg-indigo-50/10 h-full flex flex-col justify-between">
+              <div>
+                <h3 className="font-bold text-indigo-900 text-base border-b border-indigo-100/50 pb-3 mb-6 uppercase tracking-tight flex items-center gap-2">
+                  <ShieldCheck size={18} className="text-indigo-600" /> Override Credentials & SSN
+                </h3>
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest mb-1 block">Email Address (Secured Credentials)</label>
+                    <input 
+                      type="email"
+                      placeholder="secure.client@newage.com"
+                      value={editUserEmail}
+                      onChange={(e) => setEditUserEmail(e.target.value)}
+                      className="w-full p-3 bg-white border border-slate-200 rounded-xl font-bold text-slate-800 text-xs"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest mb-1 block">Phone Number</label>
+                      <input 
+                        type="text"
+                        placeholder="+1 (555) 0192"
+                        value={editUserPhone}
+                        onChange={(e) => setEditUserPhone(e.target.value)}
+                        className="w-full p-3 bg-white border border-slate-200 rounded-xl font-bold text-slate-800 text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest mb-1 block">SSN Override Value</label>
+                      <input 
+                        type="text"
+                        placeholder="XXX-XX-XXXX"
+                        value={editUserSsn}
+                        onChange={(e) => setEditUserSsn(e.target.value)}
+                        className="w-full p-3 bg-white border border-slate-200 rounded-xl font-bold text-slate-800 text-xs"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest mb-1 block">Password String</label>
+                      <input 
+                        type="text"
+                        placeholder="Master Passkey"
+                        value={editUserPassword}
+                        onChange={(e) => setEditUserPassword(e.target.value)}
+                        className="w-full p-3 bg-white border border-slate-200 rounded-xl font-bold text-slate-800 text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest mb-1 block">Security Role</label>
+                      <select 
+                        value={editUserRole}
+                        onChange={(e) => setEditUserRole(e.target.value as any)}
+                        className="w-full p-3 bg-white border border-slate-200 rounded-xl font-bold text-slate-800 text-xs"
+                      >
+                        <option value="user">USER (Private Client)</option>
+                        <option value="admin">ADMIN (Executive Ops)</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <button onClick={handleUpdateUserProfile} className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold uppercase tracking-widest mt-6 transition-colors shadow-lg shadow-indigo-100">
+                Overwrite Owner Credentials
+              </button>
+            </div>
+
+            {/* Restrictions Panel */}
+            <div className="sleek-card bg-slate-905 text-white bg-slate-900 border-slate-800 animate-in fade-in duration-300">
+              <h3 className="font-bold mb-1 uppercase tracking-tight text-slate-100">Master Restrictions & Holds</h3>
+              <p className="text-[10px] text-slate-400 mb-6 font-medium italic">Administrative locks and verification status overrides.</p>
               <div className="space-y-6">
                 <div className="space-y-3">
                   <div 
@@ -735,16 +1020,16 @@ export const AdminPanel = () => {
                      <div className="flex items-center gap-3">
                        <ShieldCheck size={20} className={accountStatus === 'disabled' ? 'text-red-400' : 'text-emerald-400'} />
                        <div>
-                          <p className="text-sm font-bold">Account Access</p>
-                          <p className="text-[10px] text-slate-400 uppercase font-bold">
-                            {accountStatus === 'active' ? 'Full Access' : 'Completely Frozen'}
+                          <p className="text-sm font-bold">Account Access Code</p>
+                          <p className="text-[10px] text-slate-450 uppercase font-black">
+                            {accountStatus === 'active' ? 'Authorized (Active)' : 'Completely Frozen'}
                           </p>
                        </div>
                      </div>
-                     <span className={`px-2 py-1 text-[9px] font-bold uppercase rounded ${
+                     <span className={`px-2 py-1 text-[9px] font-black uppercase rounded ${
                        accountStatus === 'active' 
                          ? 'bg-emerald-400/20 text-emerald-400' 
-                         : 'bg-red-400/20 text-red-400'
+                         : 'bg-red-400/20 text-red-500'
                      }`}>
                        {accountStatus}
                      </span>
@@ -761,16 +1046,16 @@ export const AdminPanel = () => {
                      <div className="flex items-center gap-3">
                        <Database size={20} className={isDepositRestricted ? 'text-amber-400' : 'text-indigo-400'} />
                        <div>
-                          <p className="text-sm font-bold">Inbound Deposits</p>
-                          <p className="text-[10px] text-slate-400 uppercase font-bold">
-                            {isDepositRestricted ? 'Incoming Blocked' : 'Allowed'}
+                          <p className="text-sm font-bold">Inbound Deposits Hold</p>
+                          <p className="text-[10px] text-slate-450 uppercase font-black">
+                            {isDepositRestricted ? 'Incoming Assets Suspended' : 'Allowed (Open)'}
                           </p>
                        </div>
                      </div>
-                     <span className={`px-2 py-1 text-[9px] font-bold uppercase rounded ${
+                     <span className={`px-2 py-1 text-[9px] font-black uppercase rounded ${
                        !isDepositRestricted 
                          ? 'bg-indigo-400/20 text-indigo-400' 
-                         : 'bg-amber-400/20 text-amber-400'
+                         : 'bg-amber-400/20 text-amber-500'
                      }`}>
                        {isDepositRestricted ? 'Restricted' : 'Open'}
                      </span>
@@ -788,38 +1073,203 @@ export const AdminPanel = () => {
               </div>
 
               <div className="mt-8 pt-8 border-t border-white/10 space-y-4">
-                <h4 className="text-[11px] font-bold uppercase tracking-widest text-slate-400">Target User Deposit Details</h4>
+                <h4 className="text-[11px] font-bold uppercase tracking-widest text-slate-450">Target User Deposit Details</h4>
                 <div className="space-y-3">
                   <input 
                     placeholder="PayPal email" 
                     value={pp} onChange={e => setPp(e.target.value)}
-                    className="w-full bg-white/5 border border-white/10 rounded-lg p-2 text-xs outline-none focus:bg-white/10"
+                    className="w-full bg-white/5 border border-white/10 rounded-lg p-2 text-xs outline-none focus:bg-white/10 text-white font-semibold"
                   />
                   <input 
                     placeholder="Cash App tag" 
                     value={ca} onChange={e => setCa(e.target.value)}
-                    className="w-full bg-white/5 border border-white/10 rounded-lg p-2 text-xs outline-none focus:bg-white/10"
+                    className="w-full bg-white/5 border border-white/10 rounded-lg p-2 text-xs outline-none focus:bg-white/10 text-white font-semibold"
                   />
                   <input 
                     placeholder="Zelle Info" 
                     value={zl} onChange={e => setZl(e.target.value)}
-                    className="w-full bg-white/5 border border-white/10 rounded-lg p-2 text-xs outline-none focus:bg-white/10"
+                    className="w-full bg-white/5 border border-white/10 rounded-lg p-2 text-xs outline-none focus:bg-white/10 text-white font-semibold"
                   />
                   <input 
                      placeholder="Bitcoin Address" 
                      value={bc} onChange={e => setBc(e.target.value)}
-                     className="w-full bg-white/5 border border-white/10 rounded-lg p-2 text-xs outline-none focus:bg-white/10"
+                     className="w-full bg-white/5 border border-white/10 rounded-lg p-2 text-xs outline-none focus:bg-white/10 text-white font-semibold"
                   />
                   <textarea 
                      placeholder="Bank Wire Details (ACH/Routing)" 
                      value={bi} onChange={e => setBi(e.target.value)}
-                     className="w-full bg-white/5 border border-white/10 rounded-lg p-2 text-xs outline-none focus:bg-white/10 h-20"
+                     className="w-full bg-white/5 border border-white/10 rounded-lg p-2 text-xs outline-none focus:bg-white/10 h-20 text-white font-semibold resize-none"
                   />
                   <button 
                     onClick={handleUpdateDepositDetails}
-                    className="w-full py-2 bg-white/20 hover:bg-white/30 rounded-lg text-xs font-bold uppercase tracking-wider"
+                    className="w-full py-2 bg-white/20 hover:bg-white/30 rounded-lg text-xs font-bold uppercase tracking-wider text-white transition-all"
                   >
                     Secured Injection
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Empty column placeholder for symmetry - or can make it full operations space */}
+            <div className="hidden lg:block bg-slate-50 border border-dashed border-slate-200 rounded-2xl h-full flex flex-col justify-center items-center text-center p-8 text-slate-400">
+               <ShieldCheck size={48} className="text-slate-300 mb-2" />
+               <p className="text-xs font-bold uppercase tracking-wide">Elite Secure Access Authorized</p>
+               <p className="text-[10px] tracking-tight leading-relaxed max-w-xs mt-1">Ready to update any security levels, overrides, custom SSNs, or balance states immediately.</p>
+            </div>
+          </div>
+
+          {/* Core Creation & Portfolio Issuing Area */}
+          <div className="pt-8 border-t border-slate-200 mt-12">
+            <h3 className="text-lg font-black tracking-tight text-slate-800 uppercase mb-2">Administrative Actions: Manual Entity Registration</h3>
+            <p className="text-xs text-slate-450 font-medium mb-6">Manually inject brand-new private clients or provision additional high-limit portfolio ledger accounts.</p>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              {/* Insert/Create New User Form */}
+              <div className="sleek-card border-dashed border-2 bg-white animate-in fade-in duration-300">
+                <h4 className="font-extrabold text-[#111] text-base mb-6 flex items-center gap-2">
+                  <Users size={18} className="text-emerald-600" /> Manually Register Private Client
+                </h4>
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Full Client Name</label>
+                    <input 
+                      type="text"
+                      placeholder="e.g. Timothy Vance"
+                      value={newUserName}
+                      onChange={(e) => setNewUserName(e.target.value)}
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 text-xs"
+                    />
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Secure Email Credentials</label>
+                      <input 
+                        type="email"
+                        placeholder="timothy.vance@offshore.com"
+                        value={newUserEmail}
+                        onChange={(e) => setNewUserEmail(e.target.value)}
+                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Custom Password Passkey</label>
+                      <input 
+                        type="text"
+                        placeholder="Default password123"
+                        value={newUserPassword}
+                        onChange={(e) => setNewUserPassword(e.target.value)}
+                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 text-xs"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Social Security Number (SSN)</label>
+                      <input 
+                        type="text"
+                        placeholder="e.g. 000-12-8921"
+                        value={newUserSsn}
+                        onChange={(e) => setNewUserSsn(e.target.value)}
+                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Phone Number</label>
+                      <input 
+                        type="text"
+                        placeholder="+1 (555) 0122"
+                        value={newUserPhone}
+                        onChange={(e) => setNewUserPhone(e.target.value)}
+                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 text-xs"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Initial Security Authorization</label>
+                    <select 
+                      value={newUserRole}
+                      onChange={(e) => setNewUserRole(e.target.value as any)}
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 text-xs"
+                    >
+                      <option value="user">USER (Authorized Elite Core Client)</option>
+                      <option value="admin">ADMIN (Operations Security Director)</option>
+                    </select>
+                  </div>
+                  <button onClick={handleInsertUser} className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold uppercase tracking-widest transition-colors shadow-lg shadow-emerald-50 mt-4">
+                    Register Client & Autogen Portfolios
+                  </button>
+                </div>
+              </div>
+
+              {/* Allocate Custom Account / Wallet to Existing User form */}
+              <div className="sleek-card border-dashed border-2 bg-white animate-in fade-in duration-300">
+                <h4 className="font-extrabold text-[#111] text-base mb-6 flex items-center gap-2">
+                  <Database size={18} className="text-brand-primary" /> Provision Custom Ledger Account
+                </h4>
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Target Private Client Owner</label>
+                    <select 
+                      value={newAccUserId}
+                      onChange={(e) => setNewAccUserId(e.target.value)}
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 text-xs"
+                    >
+                      <option value="">Choose Existing User Target...</option>
+                      {usersList.map(u => (
+                        <option key={u.uid} value={u.uid}>
+                          {u.displayName} ({u.email})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Ledger Account Type</label>
+                      <select 
+                        value={newAccType}
+                        onChange={(e) => setNewAccType(e.target.value)}
+                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 text-xs"
+                      >
+                        <option value="checking">Checking Asset Account</option>
+                        <option value="savings">Savings Portfolio Vault</option>
+                        <option value="credit">High-limit Credit Card Wallet</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Account Custom Title (Optional)</label>
+                      <input 
+                        type="text"
+                        placeholder="e.g. Vance Holdings Trust"
+                        value={newAccName}
+                        onChange={(e) => setNewAccName(e.target.value)}
+                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 text-xs"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Starting Balance Override ($)</label>
+                      <input 
+                        type="number"
+                        placeholder="14500.00"
+                        value={newAccBalance}
+                        onChange={(e) => setNewAccBalance(e.target.value)}
+                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 block">Credit Limit Overdraft ($)</label>
+                      <input 
+                        type="number"
+                        placeholder="5000.00"
+                        value={newAccCreditLimit}
+                        onChange={(e) => setNewAccCreditLimit(e.target.value)}
+                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 text-xs"
+                      />
+                    </div>
+                  </div>
+                  <button onClick={handleInsertAccount} className="w-full py-3 bg-brand-primary hover:bg-brand-primary/95 text-white rounded-xl text-xs font-bold uppercase tracking-widest transition-colors shadow-lg shadow-indigo-50 mt-10">
+                    Provision Account Portfolio
                   </button>
                 </div>
               </div>

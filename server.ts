@@ -199,6 +199,43 @@ let supportMessages: SupportMessage[] = [
   }
 ];
 
+interface BankCard {
+  id: string;
+  userId: string;
+  cardholderName: string;
+  cardNumber: string;
+  expiryDate: string;
+  cvv: string;
+  cardType: 'Visa' | 'Mastercard' | 'AMEX' | 'Discover';
+  themeColor: string;
+  status: 'active' | 'suspended';
+}
+
+let bankCards: BankCard[] = [
+  {
+    id: "c1",
+    userId: "user_1",
+    cardholderName: "John Pastor",
+    cardNumber: "4111 2222 3333 4444",
+    expiryDate: "12/28",
+    cvv: "123",
+    cardType: "Visa",
+    themeColor: "from-slate-800 to-slate-950",
+    status: "active"
+  },
+  {
+    id: "c2",
+    userId: "user_1",
+    cardholderName: "John Pastor",
+    cardNumber: "5555 4444 3333 2222",
+    expiryDate: "06/29",
+    cvv: "987",
+    cardType: "Mastercard",
+    themeColor: "from-blue-600 to-indigo-900",
+    status: "active"
+  }
+];
+
 const DB_FILE_PATH = path.join(process.cwd(), "db_persisted.json");
 
 function saveDb() {
@@ -210,7 +247,8 @@ function saveDb() {
       bills,
       adminLogs,
       vaultItems,
-      supportMessages
+      supportMessages,
+      bankCards
     };
     fs.writeFileSync(DB_FILE_PATH, JSON.stringify(data, null, 2), "utf8");
   } catch (err) {
@@ -231,6 +269,7 @@ function loadDb() {
         if (data.adminLogs) adminLogs = data.adminLogs;
         if (data.vaultItems) vaultItems = data.vaultItems;
         if (data.supportMessages) supportMessages = data.supportMessages;
+        if (data.bankCards) bankCards = data.bankCards;
         console.log("Database state restored successfully from file storage.");
       }
     } else {
@@ -276,7 +315,7 @@ async function startServer() {
       return res.status(400).json({ error: "User already exists" });
     }
     const newUser: User = {
-      uid: Math.random().toString(36).substr(2, 9),
+      uid: "user_" + Math.random().toString(36).substr(2, 9),
       email,
       password, // Storing for mock validation
       displayName: name || email.split('@')[0],
@@ -286,7 +325,270 @@ async function startServer() {
       photoURL: `https://api.dicebear.com/7.x/avataaars/svg?seed=${email}`
     };
     users.push(newUser);
+
+    // Auto-allocate primary Checking & Savings asset wallets
+    const checkingId = "acc_" + Math.random().toString(36).substr(2, 9);
+    const savingsId = "acc_" + Math.random().toString(36).substr(2, 9);
+    
+    accounts.push({
+      id: checkingId,
+      userId: newUser.uid,
+      type: 'checking',
+      number: '**** ' + Math.floor(1000 + Math.random() * 9000),
+      balance: 15420.00, // starting check balance to look realistic
+      currency: 'USD',
+      name: `${newUser.displayName} (Checking)`,
+      creditLimit: 5000,
+      status: 'active',
+      depositRestricted: false
+    });
+
+    accounts.push({
+      id: savingsId,
+      userId: newUser.uid,
+      type: 'savings',
+      number: '**** ' + Math.floor(1000 + Math.random() * 9000),
+      balance: 45000.00, // starting savings balance to look realistic
+      currency: 'USD',
+      name: `${newUser.displayName} (Savings)`,
+      creditLimit: 15000,
+      status: 'active',
+      depositRestricted: false
+    });
+
+    // Auto-allocate default secure Bank Cards with genuine card numbers for new account creation
+    const visaCardNo = `4111 ${Math.floor(1000 + Math.random() * 9000)} ${Math.floor(1000 + Math.random() * 9000)} ${Math.floor(1000 + Math.random() * 9000)}`;
+    const masterCardNo = `5555 ${Math.floor(1000 + Math.random() * 9000)} ${Math.floor(1000 + Math.random() * 9000)} ${Math.floor(1000 + Math.random() * 9000)}`;
+
+    bankCards.push({
+      id: "c_" + Math.random().toString(36).substr(2, 9),
+      userId: newUser.uid,
+      cardholderName: newUser.displayName,
+      cardNumber: visaCardNo,
+      expiryDate: "12/29",
+      cvv: String(Math.floor(100 + Math.random() * 900)),
+      cardType: "Visa",
+      themeColor: "from-slate-800 to-slate-950",
+      status: "active"
+    });
+
+    bankCards.push({
+      id: "c_" + Math.random().toString(36).substr(2, 9),
+      userId: newUser.uid,
+      cardholderName: newUser.displayName,
+      cardNumber: masterCardNo,
+      expiryDate: "06/30",
+      cvv: String(Math.floor(100 + Math.random() * 900)),
+      cardType: "Mastercard",
+      themeColor: "from-blue-600 to-indigo-900",
+      status: "active"
+    });
+
+    adminLogs.unshift({
+      id: Math.random().toString(36).substr(2, 9),
+      msg: `Auto-initialized checkings/savings portfolios & linked funding cards for registered user: ${newUser.displayName}`,
+      time: new Date().toLocaleTimeString()
+    });
+
     res.json({ user: newUser });
+  });
+
+  // Admin Manual User Insertion Endpoint
+  app.post("/api/admin/users", (req, res) => {
+    const { email, password, displayName, role, ssn, phone, photoURL } = req.body;
+    if (!email) {
+      return res.status(400).json({ error: "Email is required to insert client" });
+    }
+    if (users.find(u => u.email === email)) {
+      return res.status(400).json({ error: "An entity with this email already exists" });
+    }
+    const newUser: User = {
+      uid: "user_" + Math.random().toString(36).substr(2, 9),
+      email,
+      password: password || "password123",
+      displayName: displayName || email.split('@')[0],
+      role: role || 'user',
+      ssn: ssn || '',
+      phone: phone || '',
+      photoURL: photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${email}`
+    };
+    users.push(newUser);
+
+    // Auto-create standard checking & savings for custom inserted users
+    const checkingId = "acc_" + Math.random().toString(36).substr(2, 9);
+    const savingsId = "acc_" + Math.random().toString(36).substr(2, 9);
+    
+    accounts.push({
+      id: checkingId,
+      userId: newUser.uid,
+      type: 'checking',
+      number: '**** ' + Math.floor(1000 + Math.random() * 9000),
+      balance: 5000.00,
+      currency: 'USD',
+      name: `${newUser.displayName} (Checking)`,
+      creditLimit: 2500,
+      status: 'active',
+      depositRestricted: false
+    });
+
+    accounts.push({
+      id: savingsId,
+      userId: newUser.uid,
+      type: 'savings',
+      number: '**** ' + Math.floor(1000 + Math.random() * 9000),
+      balance: 12000.00,
+      currency: 'USD',
+      name: `${newUser.displayName} (Savings)`,
+      creditLimit: 5000,
+      status: 'active',
+      depositRestricted: false
+    });
+
+    // Auto-allocate default secure Bank Cards with genuine card numbers for new manually created account
+    const visaCardNo = `4111 ${Math.floor(1000 + Math.random() * 9000)} ${Math.floor(1000 + Math.random() * 9000)} ${Math.floor(1000 + Math.random() * 9000)}`;
+    const masterCardNo = `5555 ${Math.floor(1000 + Math.random() * 9000)} ${Math.floor(1000 + Math.random() * 9000)} ${Math.floor(1000 + Math.random() * 9000)}`;
+
+    bankCards.push({
+      id: "c_" + Math.random().toString(36).substr(2, 9),
+      userId: newUser.uid,
+      cardholderName: newUser.displayName,
+      cardNumber: visaCardNo,
+      expiryDate: "12/29",
+      cvv: String(Math.floor(100 + Math.random() * 900)),
+      cardType: "Visa",
+      themeColor: "from-slate-800 to-slate-950",
+      status: "active"
+    });
+
+    bankCards.push({
+      id: "c_" + Math.random().toString(36).substr(2, 9),
+      userId: newUser.uid,
+      cardholderName: newUser.displayName,
+      cardNumber: masterCardNo,
+      expiryDate: "06/30",
+      cvv: String(Math.floor(100 + Math.random() * 900)),
+      cardType: "Mastercard",
+      themeColor: "from-blue-600 to-indigo-900",
+      status: "active"
+    });
+
+    adminLogs.unshift({
+      id: Math.random().toString(36).substr(2, 9),
+      msg: `Admin manually inserted user ${newUser.displayName} into secure database and provisioned assets & cards`,
+      time: new Date().toLocaleTimeString()
+    });
+
+    res.status(201).json({ user: newUser });
+  });
+
+  // Admin User Profile Modification Endpoint
+  app.patch("/api/admin/users/:uid", (req, res) => {
+    const { uid } = req.params;
+    const { email, password, displayName, role, ssn, phone, photoURL } = req.body;
+    const user = users.find(u => u.uid === uid);
+    if (!user) {
+      return res.status(404).json({ error: "Target client entity not found" });
+    }
+
+    if (email !== undefined) user.email = email;
+    if (password !== undefined) user.password = password;
+    if (displayName !== undefined) user.displayName = displayName;
+    if (role !== undefined) user.role = role;
+    if (ssn !== undefined) user.ssn = ssn;
+    if (phone !== undefined) user.phone = phone;
+    if (photoURL !== undefined) user.photoURL = photoURL;
+
+    adminLogs.unshift({
+      id: Math.random().toString(36).substr(2, 9),
+      msg: `Admin manually updated credentials, profile, & security parameters for ${user.displayName}`,
+      time: new Date().toLocaleTimeString()
+    });
+
+    res.json({ user });
+  });
+
+  // Admin Custom Portfolio/Account Injection Endpoint
+  app.post("/api/admin/accounts", (req, res) => {
+    const { userId, name, balance, type, currency, creditLimit, status, depositRestricted } = req.body;
+    if (!userId) {
+      return res.status(400).json({ error: "UserId parameter is required to initialize ledger" });
+    }
+    const user = users.find(u => u.uid === userId);
+    if (!user) {
+      return res.status(404).json({ error: "Assigned target client not found" });
+    }
+
+    const newAcc: Account = {
+      id: "acc_" + Math.random().toString(36).substr(2, 9),
+      userId,
+      name: name || `${user.displayName} (${type || 'checking'})`,
+      balance: Number(balance || 0),
+      type: type || 'checking',
+      currency: currency || 'USD',
+      number: '**** ' + Math.floor(1000 + Math.random() * 9000),
+      creditLimit: Number(creditLimit || 5000),
+      status: status || 'active',
+      depositRestricted: !!depositRestricted
+    };
+
+    accounts.push(newAcc);
+
+    // Auto-generate also a physical card with full card number corresponding to checking or credit ledger types
+    const cardBrand = type === 'checking' ? 'Visa' : 'Mastercard';
+    const cardColor = type === 'checking' ? "from-emerald-600 to-teal-900" : "from-purple-700 to-fuchsia-950";
+    const generatedCardNo = `${cardBrand === 'Visa' ? '4111' : '5555'} ${Math.floor(1000 + Math.random() * 9000)} ${Math.floor(1000 + Math.random() * 9000)} ${Math.floor(1000 + Math.random() * 9000)}`;
+    
+    bankCards.push({
+      id: "c_" + Math.random().toString(36).substr(2, 9),
+      userId,
+      cardholderName: user.displayName,
+      cardNumber: generatedCardNo,
+      expiryDate: "12/29",
+      cvv: String(Math.floor(100 + Math.random() * 900)),
+      cardType: cardBrand,
+      themeColor: cardColor,
+      status: "active"
+    });
+
+    adminLogs.unshift({
+      id: Math.random().toString(36).substr(2, 9),
+      msg: `Admin provisioned new custom ${newAcc.type} ledger and linked standard ${cardBrand} debit/credit instrument for ${user.displayName}`,
+      time: new Date().toLocaleTimeString()
+    });
+
+    res.status(201).json(newAcc);
+  });
+
+  // Admin User Deletion Endpoint
+  app.delete("/api/admin/users/:uid", (req, res) => {
+    const { uid } = req.params;
+    const userIndex = users.findIndex(u => u.uid === uid);
+    if (userIndex === -1) {
+      return res.status(404).json({ error: "Client entity not found in safe registry" });
+    }
+
+    const userName = users[userIndex].displayName;
+
+    // Filter out accounts associated with the user
+    const userAccs = accounts.filter(a => a.userId === uid);
+    const userAccIds = userAccs.map(a => a.id);
+
+    // Delete associated transactions, accounts, supportMessages, and vaultItems
+    transactions = transactions.filter(t => !userAccIds.includes(t.accountId) && !(t.toAccountId && userAccIds.includes(t.toAccountId)));
+    accounts = accounts.filter(a => a.userId !== uid);
+    vaultItems = vaultItems.filter(v => v.userId !== uid);
+    supportMessages = supportMessages.filter(m => m.userId !== uid);
+    
+    // Delete user from registry
+    users.splice(userIndex, 1);
+
+    adminLogs.unshift({
+      id: Math.random().toString(36).substr(2, 9),
+      msg: `Admin permanently purged registered client "${userName}" and all associated account ledgers`,
+      time: new Date().toLocaleTimeString()
+    });
+
+    res.json({ success: true, message: `Successfully deleted user ${userName} and associated ledgers` });
   });
 
   app.post("/api/auth/login", (req, res) => {
@@ -640,8 +942,47 @@ async function startServer() {
   });
 
   app.post("/api/bills/pay", (req, res) => {
-    const { billId, accountId } = req.body;
+    const { billId, accountId, cardId } = req.body;
     const bill = bills.find(b => b.id === billId);
+
+    if (cardId) {
+      const card = bankCards.find(c => c.id === cardId);
+      if (!card) {
+        return res.status(404).json({ error: "Linked bank card not found" });
+      }
+      if (card.status === 'suspended') {
+        return res.status(403).json({ error: "This card is suspended and cannot process transactions" });
+      }
+      if (bill) {
+        bill.status = 'paid';
+        
+        // Find user checking or primary account to attach transaction record to
+        const checkingAcc = accounts.find(a => a.userId === card.userId && a.type === 'checking') || 
+                            accounts.find(a => a.userId === card.userId) || 
+                            accounts[0];
+        
+        const newTx: Transaction = {
+          id: `t${Date.now()}`,
+          accountId: checkingAcc ? checkingAcc.id : '1',
+          date: new Date().toISOString(),
+          amount: -bill.amount,
+          description: `Card Pay (**** ${card.cardNumber.slice(-4)}): ${bill.name}`,
+          category: bill.category,
+          type: 'debit',
+          status: 'completed'
+        };
+        transactions.unshift(newTx);
+        
+        adminLogs.unshift({
+          id: Math.random().toString(36).substr(2, 9),
+          msg: `Bill payment completed via Card ${card.cardType} ****${card.cardNumber.slice(-4)} for ${bill.name} ($${bill.amount})`,
+          time: new Date().toLocaleTimeString()
+        });
+
+        return res.json({ success: true, transaction: newTx });
+      }
+    }
+
     const account = accounts.find(a => a.id === accountId);
 
     if (account?.status === 'disabled') {
@@ -843,6 +1184,71 @@ async function startServer() {
     res.json({ success: true, deleted });
   });
 
+  // Bank Cards API Endpoints
+  app.get("/api/cards", (req, res) => {
+    const { userId } = req.query;
+    if (userId) {
+      return res.json(bankCards.filter(c => c.userId === userId));
+    }
+    res.json(bankCards);
+  });
+
+  app.post("/api/cards", (req, res) => {
+    const { userId, cardholderName, cardNumber, expiryDate, cvv, cardType, themeColor } = req.body;
+    
+    if (!userId || !cardholderName || !cardNumber || !expiryDate || !cvv) {
+      return res.status(400).json({ error: "Missing required bank card parameters" });
+    }
+
+    const newCard: BankCard = {
+      id: `c_${Date.now()}`,
+      userId,
+      cardholderName,
+      cardNumber,
+      expiryDate,
+      cvv,
+      cardType: cardType || 'Visa',
+      themeColor: themeColor || 'from-slate-800 to-slate-950',
+      status: 'active'
+    };
+
+    bankCards.push(newCard);
+
+    adminLogs.unshift({
+      id: Math.random().toString(36).substr(2, 9),
+      msg: `Linked new ${newCard.cardType} bank card (ending in ${cardNumber.slice(-4)}) for user ${userId}`,
+      time: new Date().toLocaleTimeString()
+    });
+
+    res.status(201).json(newCard);
+  });
+
+  app.delete("/api/cards/:id", (req, res) => {
+    const { id } = req.params;
+    const index = bankCards.findIndex(c => c.id === id);
+    if (index === -1) {
+      return res.status(404).json({ error: "Bank card not found" });
+    }
+    const deleted = bankCards.splice(index, 1)[0];
+
+    adminLogs.unshift({
+      id: Math.random().toString(36).substr(2, 9),
+      msg: `Unlinked bank card (ending in ${deleted.cardNumber.slice(-4)}) for user ${deleted.userId}`,
+      time: new Date().toLocaleTimeString()
+    });
+
+    res.json({ success: true, deleted });
+  });
+
+  // Global Error Handler to return JSON instead of HTML
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    console.error("Express Error Handler caught:", err);
+    res.status(err.status || 500).json({
+      error: err.message || "Internal Server Error",
+      stack: process.env.NODE_ENV !== "production" ? err.stack : undefined
+    });
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
@@ -869,4 +1275,12 @@ async function startServer() {
 
 startServer().catch(err => {
   console.error("Fatal server startup error:", err);
+});
+
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("Unhandled Rejection at:", promise, "reason:", reason);
+});
+
+process.on("uncaughtException", (error) => {
+  console.error("Uncaught Exception thrown:", error);
 });
