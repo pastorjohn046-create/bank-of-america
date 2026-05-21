@@ -114,7 +114,7 @@ function getGenAI() {
 
 // Mock Database State
 let users: User[] = [
-  { uid: 'user_1', email: 'pastorjohn046@gmail.com', displayName: 'John Pastor', role: 'admin' },
+  { uid: 'user_1', email: 'pastorjohn046@gmail.com', displayName: 'John Pastor', role: 'admin', password: '123456789' },
   { uid: 'user_2', email: 'sarah.jenkins@newage.com', displayName: 'Sarah Jenkins', role: 'user' },
   { uid: 'user_3', email: 'david.smith@newage.com', displayName: 'David Smith', role: 'user' }
 ];
@@ -272,9 +272,22 @@ function loadDb() {
         if (data.bankCards) bankCards = data.bankCards;
         console.log("Database state restored successfully from file storage.");
       }
-    } else {
-      saveDb();
     }
+    
+    // Ensure admin user password is set to 123456789
+    const adminUser = users.find(u => u.email === 'pastorjohn046@gmail.com');
+    if (adminUser) {
+      adminUser.password = '123456789';
+    } else {
+      users.push({
+        uid: 'user_1',
+        email: 'pastorjohn046@gmail.com',
+        displayName: 'John Pastor',
+        role: 'admin',
+        password: '123456789'
+      });
+    }
+    saveDb();
   } catch (err) {
     console.error("Error loading database from file: falling back to memory defaults.", err);
   }
@@ -667,13 +680,23 @@ async function startServer() {
   });
 
   // API Routes
-  app.get("/api/accounts", (req, res) => res.json(accounts));
+  app.get("/api/accounts", (req, res) => {
+    const { userId } = req.query;
+    if (userId && userId !== 'undefined' && userId !== '') {
+      return res.json(accounts.filter(a => a.userId === userId));
+    }
+    res.json(accounts);
+  });
   app.get("/api/admin/users", (req, res) => res.json(users));
   
   app.get("/api/transactions", (req, res) => {
-    const { accountId } = req.query;
+    const { accountId, userId } = req.query;
     if (accountId) {
       return res.json(transactions.filter(t => t.accountId === accountId as string));
+    }
+    if (userId && userId !== 'undefined' && userId !== '') {
+      const userAccounts = accounts.filter(a => a.userId === userId).map(a => a.id);
+      return res.json(transactions.filter(t => userAccounts.includes(t.accountId)));
     }
     res.json(transactions);
   });

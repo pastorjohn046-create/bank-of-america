@@ -468,13 +468,16 @@ export const AdminPanel = (props: { onMutation?: () => void }) => {
           depositRestricted: isDepositRestricted
         })
       });
-      if (!res.ok) throw new Error('Update failed');
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Update failed');
+      }
       addLog(`Updated account ${selectedAccId}: ${editName}`);
       showStatus('Entity profile updated successfully');
       fetchAll();
       props.onMutation?.();
-    } catch (err) {
-      showStatus('Failed to update entity', 'error');
+    } catch (err: any) {
+      showStatus(err.message || 'Failed to update entity', 'error');
     }
   };
 

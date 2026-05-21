@@ -4,12 +4,19 @@ import { Account, Transaction, Bill, VaultItem, BankCard } from '../types';
 const API_BASE = '/api';
 
 export const api = {
-  getAccounts: async (): Promise<Account[]> => {
-    const res = await fetch(`${API_BASE}/accounts`);
+  getAccounts: async (userId?: string): Promise<Account[]> => {
+    const url = userId ? `${API_BASE}/accounts?userId=${userId}` : `${API_BASE}/accounts`;
+    const res = await fetch(url);
     return res.json();
   },
-  getTransactions: async (accountId?: string): Promise<Transaction[]> => {
-    const url = accountId ? `${API_BASE}/transactions?accountId=${accountId}` : `${API_BASE}/transactions`;
+  getTransactions: async (accountId?: string, userId?: string): Promise<Transaction[]> => {
+    let url = `${API_BASE}/transactions`;
+    const params = new URLSearchParams();
+    if (accountId) params.append('accountId', accountId);
+    if (userId) params.append('userId', userId);
+    if (params.toString()) {
+      url += `?${params.toString()}`;
+    }
     const res = await fetch(url);
     return res.json();
   },

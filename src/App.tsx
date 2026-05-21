@@ -189,8 +189,8 @@ export default function App() {
     setIsLoading(true);
     try {
       const [accData, txData, billData, cardData] = await Promise.all([
-        api.getAccounts(),
-        api.getTransactions(),
+        api.getAccounts(user?.uid),
+        api.getTransactions(undefined, user?.uid),
         api.getBills(),
         api.getCards(user?.uid)
       ]);
