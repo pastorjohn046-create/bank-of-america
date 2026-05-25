@@ -536,6 +536,7 @@ export default function App() {
                     userId={user.uid}
                     cards={cards}
                     onCardsUpdated={fetchData}
+                    userDisplayName={user.displayName}
                   />
                 </div>
               )}

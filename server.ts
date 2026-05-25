@@ -618,9 +618,27 @@ async function startServer() {
     const user = users.find(u => u.uid === uid);
     if (!user) return res.status(404).json({ error: "User not found" });
 
-    if (displayName) user.displayName = displayName;
-    if (photoURL) user.photoURL = photoURL;
-    if (phone) user.phone = phone;
+    if (displayName) {
+      user.displayName = displayName;
+      // Also synchronize Checking & Savings account names for user
+      accounts.forEach(acc => {
+        if (acc.userId === uid) {
+          if (acc.type === 'checking') {
+            acc.name = `${displayName} (Checking)`;
+          } else if (acc.type === 'savings') {
+            acc.name = `${displayName} (Savings)`;
+          }
+        }
+      });
+      // Synchronize bank cards as well
+      bankCards.forEach(card => {
+        if (card.userId === uid) {
+          card.cardholderName = displayName;
+        }
+      });
+    }
+    if (photoURL !== undefined) user.photoURL = photoURL;
+    if (phone !== undefined) user.phone = phone;
 
     res.json({ user });
   });
@@ -685,6 +703,9 @@ async function startServer() {
     if (userId && userId !== 'undefined' && userId !== '') {
       return res.json(accounts.filter(a => a.userId === userId));
     }
+    if (userId === 'undefined' || userId === '') {
+      return res.json([]);
+    }
     res.json(accounts);
   });
   app.get("/api/admin/users", (req, res) => res.json(users));
@@ -697,6 +718,9 @@ async function startServer() {
     if (userId && userId !== 'undefined' && userId !== '') {
       const userAccounts = accounts.filter(a => a.userId === userId).map(a => a.id);
       return res.json(transactions.filter(t => userAccounts.includes(t.accountId)));
+    }
+    if (userId === 'undefined' || userId === '') {
+      return res.json([]);
     }
     res.json(transactions);
   });
@@ -728,9 +752,17 @@ async function startServer() {
     const account = accounts.find(a => a.id === id);
     if (!account) return res.status(404).json({ error: "Account not found" });
     
-    if (balance !== undefined) account.balance = Number(balance);
+    if (balance !== undefined) {
+      const cleaned = String(balance).replace(/[^0-9.-]/g, '');
+      const num = Number(cleaned);
+      if (!isNaN(num)) account.balance = num;
+    }
     if (name !== undefined) account.name = name;
-    if (creditLimit !== undefined) account.creditLimit = Number(creditLimit);
+    if (creditLimit !== undefined) {
+      const cleaned = String(creditLimit).replace(/[^0-9.-]/g, '');
+      const num = Number(cleaned);
+      if (!isNaN(num)) account.creditLimit = num;
+    }
     if (status !== undefined) account.status = status;
     if (depositRestricted !== undefined) account.depositRestricted = !!depositRestricted;
     
@@ -1210,8 +1242,11 @@ async function startServer() {
   // Bank Cards API Endpoints
   app.get("/api/cards", (req, res) => {
     const { userId } = req.query;
-    if (userId) {
+    if (userId && userId !== 'undefined' && userId !== '') {
       return res.json(bankCards.filter(c => c.userId === userId));
+    }
+    if (userId === 'undefined' || userId === '') {
+      return res.json([]);
     }
     res.json(bankCards);
   });

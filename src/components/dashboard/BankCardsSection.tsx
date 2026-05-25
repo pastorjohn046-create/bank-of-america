@@ -8,6 +8,7 @@ interface BankCardsSectionProps {
   userId: string;
   cards: BankCard[];
   onCardsUpdated: () => void;
+  userDisplayName?: string;
 }
 
 const COLOR_TEMPLATES = [
@@ -19,10 +20,10 @@ const COLOR_TEMPLATES = [
   { id: 'crimson', name: 'Crimson Velvet', css: 'from-rose-600 to-red-950 text-white' }
 ];
 
-export const BankCardsSection: React.FC<BankCardsSectionProps> = ({ userId, cards, onCardsUpdated }) => {
+export const BankCardsSection: React.FC<BankCardsSectionProps> = ({ userId, cards, onCardsUpdated, userDisplayName }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [cardNumber, setCardNumber] = useState('');
-  const [cardholderName, setCardholderName] = useState('');
+  const [cardholderName, setCardholderName] = useState(userDisplayName || '');
   const [expiryDate, setExpiryDate] = useState('');
   const [cvv, setCvv] = useState('');
   const [selectedTheme, setSelectedTheme] = useState(COLOR_TEMPLATES[0].css);
@@ -31,6 +32,12 @@ export const BankCardsSection: React.FC<BankCardsSectionProps> = ({ userId, card
   const [successMessage, setSuccessMessage] = useState('');
   const [showFullNumberId, setShowFullNumberId] = useState<string | null>(null);
   const [deletingCardId, setDeletingCardId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isOpen && userDisplayName) {
+      setCardholderName(userDisplayName);
+    }
+  }, [isOpen, userDisplayName]);
 
   // Auto-detect Card Brand
   const getCardBrand = (number: string) => {
